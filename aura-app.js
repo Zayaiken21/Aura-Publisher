@@ -387,6 +387,7 @@
     } catch (e) { $('#importState').textContent = `Import failed: ${e.message}`; toast(e.message, 'bad', 8000); }
   }
   $('#importBtn').onclick = () => importFiles($('#files').files);
+  $('#files').addEventListener('change', () => { const f = [...$('#files').files]; $('#filesPicked').hidden = !f.length; $('#filesPicked').textContent = f.length === 1 ? `Selected: ${f[0].name}` : `${f.length} files selected`; });
   const drop = $('#drop');
   drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
   drop.ondragleave = () => drop.classList.remove('drag');

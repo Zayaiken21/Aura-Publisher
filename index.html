@@ -7,7 +7,7 @@
 <title>Aura Publisher Pro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=12.0.0">
+<link rel="stylesheet" href="styles.css?v=12.0.1">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -124,8 +124,9 @@
         <h2>Import a package</h2>
         <p class="muted">Drop the one ZIP ChatGPT made from the Aura prompt. Aura checks every post against the Mindful Adaption Standard, completes the SEO, places your links and ads, and starts creating every photo automatically — the cover with the post title on it. Real photos already in the ZIP are used as they are (any file names); drawn placeholders are thrown out.</p>
         <div class="drop" id="drop" tabindex="0">
-          <strong>Drop files here</strong><span>ZIP · JSON · CSV · DOCX · PDF · MD · TXT · HTML · JPG · PNG · WEBP</span>
-          <input id="files" type="file" multiple>
+          <strong>Tap to choose your ZIP</strong><span>or drop it here · ZIP · JSON · CSV · DOCX · PDF · MD · TXT · HTML</span>
+          <b class="picked" id="filesPicked" hidden></b>
+          <input id="files" type="file" multiple aria-label="Choose package files">
         </div>
         <label class="check"><input type="checkbox" id="replaceQueue"> Replace the current queue instead of adding to it</label>
         <button id="importBtn" class="primary">Analyze package</button>
@@ -303,9 +304,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=12.0.0"></script>
-<script src="aura-vault.js?v=12.0.0"></script>
-<script src="aura-prompt.js?v=12.0.0"></script>
-<script src="aura-app.js?v=12.0.0"></script>
+<script src="config.js?v=12.0.1"></script>
+<script src="aura-vault.js?v=12.0.1"></script>
+<script src="aura-prompt.js?v=12.0.1"></script>
+<script src="aura-app.js?v=12.0.1"></script>
 </body>
 </html>
