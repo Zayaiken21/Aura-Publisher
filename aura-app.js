@@ -10,11 +10,12 @@
 
   const DEFAULTS = {
     wp: { url: '', username: '', appPassword: '' }, openaiKey: '',
-    standard: { enforce: true, autoGenerate: true, quality: 'medium', altTemplate: '{subject|caption|section|title}, illustrating {keyword}',
-      style: 'Photorealistic editorial photography, natural window light, authentic diverse real people in everyday settings, shallow depth of field, warm hopeful mood, soft colour palette.' },
+    standard: { enforce: true, autoGenerate: true, quality: 'high', imagesPerMinute: 4, heroText: true, rejectPlaceholders: true, altTemplate: '{subject|caption|section|title}, illustrating {keyword}',
+      style: 'Vibrant, richly detailed editorial lifestyle photography: real people sharing genuine moments, warm natural sunlight, abundant layered scenes, true-to-life colour, magazine-cover quality.' },
     ads: [], adLabel: 'Sponsored',
+    adLayout: { top: true, topPosition: 'after-intro', side: true, sideMax: 2, textLinks: true, textLinkMax: 3, end: true, endMax: 3, disclosure: true, disclosureText: 'This post contains affiliate links. If you buy through them, we may earn a small commission at no extra cost to you.', wordsPerAd: 350 },
     publish: { status: 'publish', mode: 'upsert', gapDays: 0 },
-    prompt: { siteName: '', niche: '', audience: '', voice: '', topics: '', count: 5 },
+    prompt: { siteName: '', niche: '', audience: '', voice: '', topics: '', extra: '', count: 5, batchSize: 3, batch: 0 },
     autoLockMin: 30
   };
   const merge = (a, b) => { const o = structuredClone(a); for (const k in b || {}) o[k] = b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object' ? merge(a[k], b[k]) : b[k]; return o; };
@@ -46,7 +47,13 @@
     return j;
   }
   const canGenerate = () => !!(health.features?.imageGeneration || S?.openaiKey);
-  const stdOptions = () => ({ enforce: S.standard.enforce, canGenerate: canGenerate(), altTemplate: S.standard.altTemplate });
+  const stdOptions = () => ({ enforce: S.standard.enforce, canGenerate: canGenerate(), altTemplate: S.standard.altTemplate, heroText: S.standard.heroText !== false, rejectPlaceholders: S.standard.rejectPlaceholders !== false, usedSignatures: (ws.sigs || []).slice(-1500) });
+  // Remember every photo "signature" (setting + shot + time) so new posts never repeat an earlier image.
+  function rememberSigs(posts) {
+    const all = new Set(ws.sigs || []);
+    for (const p of posts) for (const i of images(p)) if (i.sig) all.add(i.sig);
+    ws.sigs = [...all].slice(-2000);
+  }
 
   // ---------- per-user image store (IndexedDB) ----------
   const dbp = new Promise((res, rej) => { const q = indexedDB.open('aura-assets-v11', 1); q.onupgradeneeded = () => { const d = q.result; if (!d.objectStoreNames.contains('assets')) d.createObjectStore('assets', { keyPath: 'key' }); }; q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
@@ -164,18 +171,23 @@
   $('#bulkGap').onchange = () => { S.publish.gapDays = Number($('#bulkGap').value); V.save(S).catch(() => {}); };
 
   // ---------- image generation ----------
+  let lastImageAt = 0;
   async function generateFor(p) {
     if (!canGenerate()) throw new Error('Image generation is not configured. Add OPENAI_API_KEY on Render or your own key in Connections.');
     await refreshPending();
     const todo = images(p).filter(i => p.pending.includes(i.filename));
     let n = 0;
     for (const img of todo) {
+      // Pace requests to the chosen images-per-minute so OpenAI never has to refuse one.
+      const gap = 60000 / Math.max(1, Number(S.standard.imagesPerMinute) || 4);
+      const wait = lastImageAt + gap - Date.now();
+      if (wait > 0) { progress(n, todo.length, `Pacing to stay under your image limit… ${Math.ceil(wait / 1000)} s`); await sleep(wait); }
+      lastImageAt = Date.now();
       progress(n, todo.length, `Generating ${img.filename} (${n + 1}/${todo.length})…`);
       log(`Generating ${img.filename}`);
-      const j = await api('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.prompt || `${p.title}. ${img.alt_text}`, filename: img.filename, style: S.standard.style, quality: S.standard.quality, openaiKey: S.openaiKey || undefined }) }, 3);
+      const j = await api('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.render_prompt || img.prompt || `${p.title}. ${img.alt_text}`, filename: img.filename, style: S.standard.style, quality: S.standard.quality, openaiKey: S.openaiKey || undefined }) }, 4);
       await assetPut({ name: img.filename, mime: j.mime, dataBase64: j.dataBase64, size: j.dataBase64.length * 0.75 });
       n++; log(`Created ${img.filename}`, 'ok');
-      await sleep(1200); // gentle pacing between image calls
     }
     progress(null);
     await refreshPending();
@@ -197,7 +209,7 @@
     fd.append('wordpress', JSON.stringify(S.wp));
     const { source, validation, pending, wp, target, standard, ...post } = p;
     fd.append('post', JSON.stringify(post));
-    fd.append('options', JSON.stringify({ status: t.status, date: t.date, mode: S.publish.mode, ads: S.ads, adLabel: S.adLabel, existingMedia: wp?.media || {}, wpPostId: wp?.id || null }));
+    fd.append('options', JSON.stringify({ status: t.status, date: t.date, mode: S.publish.mode, ads: S.ads, adLabel: S.adLabel, adLayout: S.adLayout, existingMedia: wp?.media || {}, wpPostId: wp?.id || null }));
     const reuse = new Set(Object.keys(wp?.media || {}).map(lc));
     for (const img of images(p)) {
       if (reuse.has(lc(img.filename))) continue;
@@ -217,7 +229,8 @@
     progress(null);
     p.wp = { id: j.id, link: j.link, status: j.status, media: { ...(wp?.media || {}), ...(j.media || {}) }, at: Date.now() };
     saveWs();
-    const msg = `${j.updated ? 'Updated' : 'Created'} "${p.title}" — ${statusLabel[j.status] || j.status} (#${j.id}, ${j.uploadedImages} image${j.uploadedImages === 1 ? '' : 's'} uploaded)`;
+    const pl = j.placements || {}, adsTxt = [pl.top && `${pl.top} top`, pl.side && `${pl.side} side`, pl.inline && `${pl.inline} in-content`, pl.textLinks && `${pl.textLinks} text link${pl.textLinks > 1 ? 's' : ''}`, pl.end && 'resources list'].filter(Boolean).join(', ');
+    const msg = `${j.updated ? 'Updated' : 'Created'} "${p.title}" — ${statusLabel[j.status] || j.status} (#${j.id}, ${j.uploadedImages} image${j.uploadedImages === 1 ? '' : 's'} uploaded${adsTxt ? `; ads: ${adsTxt}` : ''})`;
     log(msg, 'ok'); toast(msg, 'ok');
     return j;
   }
@@ -264,6 +277,23 @@
   }
   async function preview(p) {
     urls.splice(0).forEach(u => URL.revokeObjectURL(u));
+    try {
+      const j = await api('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ post: (({ source, validation, pending, wp, target, ...x }) => x)(p), options: { ads: S.ads, adLabel: S.adLabel, adLayout: S.adLayout } }) }, 1);
+      let html = j.html.replace(/<!-- \/?wp:[^>]*-->/g, '');
+      const names = [...new Set([...html.matchAll(/aura-asset:([^"]+)/g)].map(m => m[1]))];
+      for (const n of names) {
+        const a = await assetGet(n);
+        const img = images(p).find(i => lc(i.filename) === lc(n));
+        const rep2 = a ? (() => { const u = URL.createObjectURL(b64blob(a)); urls.push(u); return u; })() : '';
+        html = a ? html.split(`aura-asset:${n}`).join(rep2) : html.replace(new RegExp(`<figure[^>]*>\\s*<img src="aura-asset:${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>(.*?)</figure>`, 's'), `<figure class="ph"><div><b>Photo will be generated</b><small>${esc(img?.art?.scene || img?.prompt || '')}</small></div></figure>`);
+      }
+      const hero = p.featured_image ? await imgTag(p.featured_image, 'hero') : '';
+      const st = p.standard?.stats || {}, pl = j.placements || {};
+      $('#previewMeta').textContent = `${st.words || 0} words · ${st.minutes || 0} min · ${st.images || 0} photos · ads: ${pl.top || 0} top, ${pl.side || 0} side, ${pl.inline || 0} in-content, ${pl.textLinks || 0} links${pl.end ? ', resources list' : ''}`;
+      $('#previewBody').innerHTML = `<h1>${esc(p.title)}</h1>${hero}<div class="wp-preview">${html}</div>`;
+      $('#preview').showModal();
+      return;
+    } catch (e) { log(`Exact preview unavailable (${e.message}); showing a simple preview.`, 'warn'); }
     let adI = 0, out = `<h1>${esc(p.title)}</h1>`;
     if (p.featured_image) out += await imgTag(p.featured_image, 'hero');
     for (let i = 0; i < p.sections.length; i++) {
@@ -302,11 +332,14 @@
       if (replace) { await assetClearUser(uid); ws.posts = []; }
       for (const a of j.assets || []) await assetPut(a);
       const byId = new Map(ws.posts.map((p, i) => [p.post_id, i]));
+      rememberSigs(j.posts);
+      for (const n of j.rejectedImages || []) await assetDel(n).catch(() => {}); // never keep drawn placeholders
       for (const p of j.posts) { const at = byId.get(p.post_id); if (at != null) { p.wp = ws.posts[at].wp; p.target = ws.posts[at].target; ws.posts[at] = p; } else ws.posts.push(p); }
       await refreshPending(); render();
       const pend = ws.posts.reduce((t, p) => t + (p.pending?.length || 0), 0);
       const fixes = j.posts.reduce((t, p) => t + (p.standard?.notes?.length || 0), 0);
-      $('#importState').textContent = `Imported ${j.posts.length} posts and ${j.assets.length} images from ${j.manifestSource || 'files'} · ${j.summary.ready} ready · ${fixes} auto-fixes · ${pend} images to generate.`;
+      const rej = (j.rejectedImages || []).length;
+      $('#importState').textContent = `Imported ${j.posts.length} posts and ${j.assets.length} images from ${j.manifestSource || 'files'} · ${j.summary.ready} ready · ${fixes} auto-fixes · ${pend} images to generate${rej ? ` · ${rej} drawn placeholder image${rej > 1 ? 's' : ''} replaced with real-photo generation` : ''}.`;
       log($('#importState').textContent, 'ok');
       switchTab('queue');
     } catch (e) { $('#importState').textContent = `Import failed: ${e.message}`; toast(e.message, 'bad', 8000); }
@@ -320,48 +353,139 @@
   // ---------- standard & ads ----------
   function fillStandard() {
     $('#stEnforce').checked = S.standard.enforce; $('#stAutoGen').checked = S.standard.autoGenerate; $('#stQuality').value = S.standard.quality;
-    $('#stAlt').value = S.standard.altTemplate; $('#stStyle').value = S.standard.style; $('#adLabel').value = S.adLabel; renderAds();
+    $('#stHeroText').checked = S.standard.heroText !== false; $('#stRejectPh').checked = S.standard.rejectPlaceholders !== false;
+    $('#stIpm').value = String(S.standard.imagesPerMinute || 4);
+    $('#stAlt').value = S.standard.altTemplate; $('#stStyle').value = S.standard.style; $('#adLabel').value = S.adLabel;
+    const L = S.adLayout;
+    $('#lyTop').checked = L.top; $('#lySide').checked = L.side; $('#lyText').checked = L.textLinks; $('#lyEnd').checked = L.end; $('#lyDisc').checked = L.disclosure;
+    $('#lyTopPos').value = L.topPosition; $('#lySideMax').value = String(L.sideMax); $('#lyTextMax').value = String(L.textLinkMax); $('#lyDensity').value = String(L.wordsPerAd); $('#lyEndMax').value = String(L.endMax); $('#lyDiscText').value = L.disclosureText;
+    renderAds();
   }
+  const adSlug = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60).replace(/-$/, '');
+  const PLACES = [['top', 'Top'], ['side', 'Side'], ['inline', 'In-content'], ['text', 'Text links'], ['end', 'Resources']];
   function renderAds() {
-    $('#adList').innerHTML = S.ads.length ? S.ads.map((a, i) => `<div class="ad-row" data-i="${i}">
+    const q = ($('#adFilter')?.value || '').toLowerCase();
+    const rows = S.ads.map((a, i) => ({ a, i })).filter(({ a }) => !q || JSON.stringify(a).toLowerCase().includes(q));
+    $('#adList').innerHTML = rows.length ? rows.map(({ a, i }) => {
+      const pl = new Set(a.placements?.length ? a.placements : PLACES.map(p => p[0]));
+      return `<details class="ad-row" data-i="${i}" ${a._open ? 'open' : ''}>
+      <summary><b>${esc(a.name || a.label || 'New link')}</b><code>${esc(adSlug(a.id || a.name || a.label) || '—')}</code><small>${esc((a.keywords || '').toString().slice(0, 60))}</small>${a.enabled === false ? '<span class="b">Off</span>' : ''}</summary>
       <div class="grid2">
-        <label>Name<input data-k="name" value="${esc(a.name)}" placeholder="e.g. Journal affiliate"></label>
-        <label>Link URL<input data-k="url" value="${esc(a.url)}" placeholder="https://…"></label>
+        <label>Name<input data-k="name" value="${esc(a.name)}" placeholder="e.g. Calm Weighted Blanket"></label>
+        <label>Link URL<input data-k="url" value="${esc(a.url)}" placeholder="https://…" inputmode="url"></label>
+        <label>Keywords (where it fits)<input data-k="keywords" value="${esc(Array.isArray(a.keywords) ? a.keywords.join(', ') : a.keywords)}" placeholder="weighted blanket, sleep, anxiety"></label>
         <label>Headline<input data-k="label" value="${esc(a.label)}" placeholder="The 5-minute gratitude journal"></label>
         <label>Button text<input data-k="cta" value="${esc(a.cta)}" placeholder="See the journal"></label>
         <label>One-line description<input data-k="text" value="${esc(a.text)}"></label>
         <label>Image URL (optional)<input data-k="image" value="${esc(a.image)}"></label>
+        <label>ID used in the prompt<input data-k="id" value="${esc(a.id || '')}" placeholder="${esc(adSlug(a.name || a.label))}"></label>
       </div>
+      <fieldset class="places"><legend>May appear as</legend>${PLACES.map(([k, t]) => `<label class="check"><input type="checkbox" data-pl="${k}" ${pl.has(k) ? 'checked' : ''}> ${t}</label>`).join('')}</fieldset>
       <label>HTML ad code (optional, replaces the link card)<textarea data-k="html" rows="2">${esc(a.html)}</textarea></label>
       <div class="row between"><label class="check"><input type="checkbox" data-k="enabled" ${a.enabled !== false ? 'checked' : ''}> Active</label><button class="ghost danger sm" data-del="${i}">Remove</button></div>
-    </div>`).join('') : `<p class="muted">No ads yet. Empty slots publish as an ad placeholder your ad plugin can fill.</p>`;
+    </details>`; }).join('') : `<p class="muted">${S.ads.length ? 'No matches.' : 'No links yet. Paste your list above. Empty ad slots publish as a placeholder your ad plugin can fill.'}</p>`;
   }
-  function readAds() { return $$('.ad-row').map(r => { const o = {}; r.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim()); return o; }); }
-  $('#addAd').onclick = () => { S.ads = readAds(); S.ads.push({ name: '', url: '', label: '', cta: 'Learn more', text: '', image: '', html: '', enabled: true }); renderAds(); };
-  $('#adList').onclick = e => { const d = e.target.closest('[data-del]'); if (!d) return; S.ads = readAds(); S.ads.splice(Number(d.dataset.del), 1); renderAds(); };
+  // Read edits back from visible rows; filtered-out rows keep their stored values.
+  function readAds() {
+    const out = S.ads.map(a => ({ ...a }));
+    $$('.ad-row').forEach(r => {
+      const i = Number(r.dataset.i), o = out[i]; if (!o) return;
+      r.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim());
+      o.placements = [...r.querySelectorAll('[data-pl]')].filter(x => x.checked).map(x => x.dataset.pl);
+      o.id = adSlug(o.id || o.name || o.label); o._open = r.open;
+    });
+    return out;
+  }
+  const blankAd = () => ({ id: '', name: '', url: '', keywords: '', label: '', cta: 'Learn more', text: '', image: '', html: '', placements: PLACES.map(p => p[0]), enabled: true });
+  $('#addAd').onclick = () => { S.ads = readAds(); S.ads.unshift({ ...blankAd(), _open: true }); $('#adFilter').value = ''; renderAds(); };
+  $('#adList').onclick = e => { const d = e.target.closest('[data-del]'); if (!d) return; e.preventDefault(); S.ads = readAds(); S.ads.splice(Number(d.dataset.del), 1); renderAds(); };
+  $('#adFilter').oninput = () => { S.ads = readAds(); renderAds(); };
+  function parseAdList(text) {
+    const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const out = [];
+    for (const l of lines) {
+      let parts = l.includes('|') ? l.split('|') : l.includes('\t') ? l.split('\t') : null;
+      if (!parts) { // comma separated: name, url, keywords…
+        const m = l.match(/^(.*?)[,;]\s*(https?:\/\/\S+?)(?:[,;]\s*(.*))?$/);
+        parts = m ? [m[1], m[2], m[3] || ''] : [l];
+      }
+      parts = parts.map(x => x.trim());
+      let [name, url, keywords = '', cta = '', text = '', image = ''] = parts;
+      if (/^https?:\/\//i.test(name) && !/^https?:\/\//i.test(url || '')) [name, url] = [url || '', name];
+      if (/^name$/i.test(name) && /url|link/i.test(url || '')) continue; // header row
+      if (!/^https?:\/\//i.test(url || '')) continue;
+      if (!name) try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { name = 'Link'; }
+      out.push({ ...blankAd(), id: adSlug(name), name, url, keywords, cta: cta || 'Learn more', text, image, label: name });
+    }
+    return out;
+  }
+  $('#adBulkAdd').onclick = async () => {
+    const list = parseAdList($('#adBulk').value);
+    if (!list.length) return toast('No lines with a link found. Use: Name | https://link | keywords', 'warn');
+    S.ads = readAds();
+    let added = 0, updated = 0;
+    for (const a of list) {
+      const at = S.ads.findIndex(x => x.url === a.url || adSlug(x.id || x.name) === a.id);
+      if (at > -1) { S.ads[at] = { ...S.ads[at], ...Object.fromEntries(Object.entries(a).filter(([k, v]) => v && k !== 'placements')) }; updated++; }
+      else { S.ads.push(a); added++; }
+    }
+    const ids = new Map(); for (const a of S.ads) { let id = adSlug(a.id || a.name) || 'link', k = 2; while (ids.has(id)) id = `${adSlug(a.id || a.name)}-${k++}`; ids.set(id, 1); a.id = id; }
+    await V.save(S); renderAds(); buildPrompt(); updateDetails();
+    $('#adBulk').value = ''; $('#adBulkState').textContent = `${added} added, ${updated} updated · ${S.ads.length} in library`;
+    toast(`Library saved: ${added} added, ${updated} updated.`, 'ok');
+  };
   $('#saveAds').onclick = async () => {
     const ads = readAds(); const bad = ads.find(a => a.url && !/^https?:\/\//i.test(a.url));
-    if (bad) return toast(`Ad link must start with https:// (${bad.url})`, 'bad');
-    S.ads = ads; S.adLabel = $('#adLabel').value.trim() || 'Sponsored'; await V.save(S); buildPrompt(); updateDetails(); toast('Ads saved. They fill every empty ad slot.', 'ok');
+    if (bad) return toast(`Link must start with https:// (${bad.url})`, 'bad');
+    S.ads = ads.map(({ _open, ...a }) => a); S.adLabel = $('#adLabel').value.trim() || 'Sponsored'; await V.save(S); buildPrompt(); updateDetails(); renderAds(); toast('Library saved. Links are placed where their keywords fit.', 'ok');
+  };
+  $('#saveLayout').onclick = async () => {
+    Object.assign(S.adLayout, { top: $('#lyTop').checked, side: $('#lySide').checked, textLinks: $('#lyText').checked, end: $('#lyEnd').checked, disclosure: $('#lyDisc').checked,
+      topPosition: $('#lyTopPos').value, sideMax: Number($('#lySideMax').value), textLinkMax: Number($('#lyTextMax').value), wordsPerAd: Number($('#lyDensity').value), endMax: Number($('#lyEndMax').value), disclosureText: $('#lyDiscText').value.trim() || DEFAULTS.adLayout.disclosureText });
+    await V.save(S); toast('Ad placement saved. Preview a post to see it.', 'ok');
+  };
+  $('#copyCss').onclick = async () => {
+    try { const r = await fetch(API + '/api/ad-css', { cache: 'no-store' }); const css = await r.text(); await navigator.clipboard.writeText(css); toast('CSS copied. Paste it in Appearance → Customize → Additional CSS.', 'ok'); }
+    catch (e) { toast('Could not copy the CSS: ' + e.message, 'bad'); }
   };
   $('#saveStandard').onclick = async () => {
-    Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
-    await V.save(S); updateDetails(); toast('Standard saved.', 'ok');
+    Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, heroText: $('#stHeroText').checked, rejectPlaceholders: $('#stRejectPh').checked, imagesPerMinute: Number($('#stIpm').value), altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
+    await V.save(S); updateDetails(); toast(ws.posts.length ? 'Standard saved. Tap "Re-apply to queue" to update posts already imported.' : 'Standard saved.', 'ok', 6000);
   };
   $('#reapply').onclick = async () => {
     if (!ws.posts.length) return toast('The queue is empty.', 'warn');
     try {
       const j = await api('/api/standardize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ posts: ws.posts.map(({ validation, pending, ...p }) => p), options: stdOptions(), assetNames: await assetKeys() }) });
-      ws.posts = j.posts; await refreshPending(); render(); toast('Standard re-applied to the queue.', 'ok');
+      ws.posts = j.posts; rememberSigs(j.posts); await refreshPending(); render(); toast('Standard re-applied to the queue.', 'ok');
     } catch (e) { toast(e.message, 'bad'); }
   };
 
   // ---------- prompt ----------
-  const pFields = { pSite: 'siteName', pCount: 'count', pNiche: 'niche', pAudience: 'audience', pVoice: 'voice', pTopics: 'topics' };
-  function buildPrompt() { $('#promptOut').value = window.AuraPrompt.build({ ...S.prompt, ads: S.ads }); }
-  Object.entries(pFields).forEach(([id, k]) => $('#' + id).addEventListener('input', () => { S.prompt[k] = id === 'pCount' ? Number($('#' + id).value) : $('#' + id).value; buildPrompt(); clearTimeout(buildPrompt.t); buildPrompt.t = setTimeout(() => V.save(S).catch(() => {}), 800); }));
-  $('#copyPrompt').onclick = async () => { try { await navigator.clipboard.writeText($('#promptOut').value); toast('Prompt copied. Paste it into ChatGPT.', 'ok'); } catch { $('#promptOut').select(); document.execCommand('copy'); toast('Prompt copied.', 'ok'); } };
-  $('#dlPrompt').onclick = () => download('aura-chatgpt-prompt.md', $('#promptOut').value, 'text/markdown');
+  const pFields = { pSite: 'siteName', pCount: 'count', pNiche: 'niche', pAudience: 'audience', pVoice: 'voice', pTopics: 'topics', pExtra: 'extra', pBatchSize: 'batchSize' };
+  const promptCfg = () => ({ ...S.prompt, ads: S.ads });
+  function buildPrompt() {
+    if (!S) return;
+    const pl = window.AuraPrompt.plan(promptCfg());
+    const n = pl.batches.length;
+    S.prompt.batch = Math.min(Math.max(0, S.prompt.batch || 0), n - 1);
+    $('#pBatch').innerHTML = pl.batches.map((b, i) => `<option value="${i}">${i + 1} of ${n}${b[0] ? ` — ${esc(b[0].topic.slice(0, 40))}` : ''}</option>`).join('');
+    $('#pBatch').value = String(S.prompt.batch);
+    $('#promptOut').value = window.AuraPrompt.build(promptCfg(), S.prompt.batch);
+    $('#pTopicsHint').textContent = pl.topics.length ? `${pl.topics.length} posts in your list → ${n} batch${n > 1 ? 'es' : ''} of up to ${pl.size}.` : 'Leave empty to let ChatGPT choose topics.';
+    const ads = (S.ads || []).filter(a => a.enabled !== false && (a.url || a.html)).length;
+    $('#pState').textContent = `Batch ${S.prompt.batch + 1} of ${n} · ${ads} affiliate link${ads === 1 ? '' : 's'} included · paste one batch per ChatGPT reply, import each ZIP.`;
+    updateDetails();
+  }
+  Object.entries(pFields).forEach(([id, k]) => $('#' + id).addEventListener('input', () => {
+    S.prompt[k] = ['pCount', 'pBatchSize'].includes(id) ? Number($('#' + id).value) : $('#' + id).value;
+    if (id === 'pTopics' || id === 'pBatchSize' || id === 'pCount') S.prompt.batch = 0;
+    clearTimeout(buildPrompt.t); buildPrompt.t = setTimeout(() => { buildPrompt(); V.save(S).catch(() => {}); }, 250);
+  }));
+  $('#pBatchSize').addEventListener('change', () => $('#pBatchSize').dispatchEvent(new Event('input')));
+  $('#pBatch').onchange = () => { S.prompt.batch = Number($('#pBatch').value); buildPrompt(); V.save(S).catch(() => {}); };
+  $('#nextBatch').onclick = () => { const n = window.AuraPrompt.plan(promptCfg()).batches.length; if (S.prompt.batch >= n - 1) return toast('That was the last batch.', 'ok'); S.prompt.batch++; buildPrompt(); V.save(S).catch(() => {}); };
+  $('#copyPrompt').onclick = async () => { try { await navigator.clipboard.writeText($('#promptOut').value); toast(`Batch ${S.prompt.batch + 1} copied. Paste it into ChatGPT.`, 'ok'); } catch { $('#promptOut').select(); document.execCommand('copy'); toast('Prompt copied.', 'ok'); } };
+  $('#dlPrompt').onclick = () => download('aura-chatgpt-prompts.md', window.AuraPrompt.buildAll(promptCfg()), 'text/markdown');
   function download(name, text, type = 'application/json') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
   // ---------- connections ----------
@@ -420,7 +544,8 @@
     $('#tdQueue').textContent = ps.length ? `${ps.length} post${ps.length > 1 ? 's' : ''} · ${ready} ready${live ? ` · ${live} live` : ''}` : 'No posts yet';
     const ads = (S.ads || []).filter(a => a.enabled !== false && (a.url || a.html)).length;
     $('#tdStandard').textContent = `${ads} ad${ads === 1 ? '' : 's'} · ${S.standard.enforce ? 'standard on' : 'standard off'}`;
-    $('#tdPrompt').textContent = `${S.prompt.count || 5} posts per package`;
+    const plx = window.AuraPrompt.plan({ ...S.prompt, ads: [] });
+    $('#tdPrompt').textContent = plx.topics.length ? `${plx.topics.length} posts · ${plx.batches.length} batches` : `${S.prompt.batchSize || 3} posts per batch`;
     let host = ''; try { host = hasWp() ? new URL(S.wp.url).hostname : ''; } catch { host = S.wp.url; }
     $('#tdConn').textContent = hasWp() ? host : 'WordPress not added';
     $('#tdConn').classList.toggle('warn', !hasWp());
@@ -494,6 +619,7 @@
 
   async function enterApp() {
     S = merge(DEFAULTS, V.settings()); uid = V.current().uid;
+    if (/^Photorealistic editorial photography, natural window light, authentic diverse real people/.test(S.standard.style || '')) S.standard.style = DEFAULTS.standard.style; // move old default to the new people-first style
     $('#who').textContent = V.current().username;
     $('#lock').hidden = true; $('#app').hidden = false;
     loadWs(); fillStandard(); fillConnections();
@@ -503,6 +629,30 @@
     $('#autoLock').value = String(S.autoLockMin || 30);
     await refreshPending().catch(() => {}); render(); genState(); bumpIdle();
     switchTab('queue');
+    upgradeQueue().catch(e => log(`Queue upgrade skipped: ${e.message}`, 'warn'));
+  }
+  // One-time upgrade of posts imported by older versions: drop drawn placeholder images and rebuild photo direction.
+  async function isPlaceholder(a) {
+    try {
+      const bmp = await createImageBitmap(b64blob(a)); const px = bmp.width * bmp.height; bmp.close?.();
+      const bytes = a.dataBase64.length * 0.75, bpp = bytes / px;
+      return px < 250000 || (/jpe?g/.test(a.mime || 'jpeg') ? bpp < 0.075 : /png/.test(a.mime || '') ? bpp < 0.3 : false);
+    } catch { return false; }
+  }
+  async function upgradeQueue() {
+    if (!ws.posts.length || !S) return;
+    let dropped = 0;
+    if (S.standard.rejectPlaceholders !== false && !ws.phScanned) {
+      for (const p of ws.posts) for (const i of images(p)) { if (p.wp?.media?.[i.filename]) continue; const a = await assetGet(i.filename); if (a && await isPlaceholder(a)) { await assetDel(i.filename); dropped++; } }
+      ws.phScanned = true; saveWs();
+    }
+    const stale = ws.posts.some(p => images(p).some(i => !i.render_prompt));
+    if ((stale || dropped) && health.online !== false) {
+      const j = await api('/api/standardize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ posts: ws.posts.map(({ validation, pending, ...p }) => p), options: stdOptions(), assetNames: await assetKeys() }) });
+      ws.posts = j.posts; rememberSigs(j.posts);
+    }
+    await refreshPending(); render();
+    if (dropped) { log(`Removed ${dropped} drawn placeholder image${dropped > 1 ? 's' : ''}; real photos will be generated instead.`, 'ok'); toast(`${dropped} placeholder images will be replaced with real photos.`, 'ok'); }
   }
   function lockUi() {
     V.lock(); S = null; uid = null; ws = { posts: [], schemaVersion: 11 };

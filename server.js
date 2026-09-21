@@ -8,8 +8,8 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '5.0.0';
-const PROTOCOL = '11.0';
+const API_VERSION = '5.1.0';
+const PROTOCOL = '11.1';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -142,10 +142,10 @@ function wpError(e) {
 
 // ---------- normalization ----------
 function normalizeAd(s) {
-  return { type: 'ad', slot: String(s.slot || ''), label: pick(s, 'label', 'headline', 'title'), url: pick(s, 'url', 'link', 'href'), cta: pick(s, 'cta', 'button'), text: pick(s, 'text', 'content', 'description'), image: pick(s, 'image', 'image_url'), html: s.html || '' };
+  return { type: 'ad', slot: String(s.slot || ''), ad_id: String(pick(s, 'ad_id', 'affiliate_id', 'id') || ''), placement: ['side', 'inline'].includes(String(s.placement).toLowerCase()) ? String(s.placement).toLowerCase() : 'inline', label: pick(s, 'label', 'headline', 'title'), url: pick(s, 'url', 'link', 'href'), cta: pick(s, 'cta', 'button'), text: pick(s, 'text', 'content', 'description'), image: pick(s, 'image', 'image_url'), html: s.html || '' };
 }
 function normalizeImage(s) {
-  return { type: 'image', filename: String(pick(s, 'filename', 'file', 'name')).split('/').pop(), alt_text: pick(s, 'alt_text', 'alt'), prompt: s.prompt || '', caption: s.caption || '', purpose: s.purpose || '', subject: s.subject || '', generate: !!s.generate };
+  return { type: 'image', filename: String(pick(s, 'filename', 'file', 'name')).split('/').pop(), alt_text: pick(s, 'alt_text', 'alt'), prompt: s.prompt || '', caption: s.caption || '', purpose: s.purpose || '', subject: s.subject || '', concept: s.concept || '', shot: s.shot || '', setting: s.setting || '', time_of_day: s.time_of_day || '', lighting: s.lighting || '', lens: s.lens || '', palette: s.palette || '', people: s.people || '', emotion: s.emotion || '', generic_prompt: !!s.generic_prompt, generate: !!s.generate };
 }
 function normalizeSection(s) {
   if (!s || typeof s !== 'object') return null;
@@ -175,7 +175,7 @@ function normalizePost(raw = {}) {
     post_id: postId, title, slug: s,
     excerpt: pick(raw, 'excerpt', 'description', 'meta_description'),
     primary_keyword: raw.primary_keyword || '', secondary_keywords: arr(raw.secondary_keywords),
-    format_variant: raw.format_variant || '',
+    format_variant: raw.format_variant || '', hero_text: clip(raw.hero_text || '', 60),
     categories: arr(pick(raw, 'categories', 'category')), tags: arr(raw.tags),
     status: raw.status || 'draft', date: raw.date || '',
     featured_image: fi && (fi.filename || fi.prompt) ? fi : null, sections
@@ -268,22 +268,32 @@ function applyStandard(input, o = {}) {
   const used = new Set(); let n = 0;
   for (const x of s) if (x.type === 'ad') { n++; if (!x.slot || used.has(x.slot)) x.slot = `article-${n}`; while (used.has(x.slot)) x.slot = `article-${++n}`; used.add(x.slot); }
 
-  // Alt text + prompts for every image
-  let altFilled = 0, k = 0, lastHeading = '';
-  const ctxFor = (img, section, i) => ({ title: p.title, keyword: kw, caption: img.caption, purpose: img.purpose, subject: img.subject, section, n: i });
-  if (p.featured_image) {
-    if (genericAlt(p.featured_image.alt_text, p.featured_image.filename)) { p.featured_image.alt_text = fillTemplate(o.altTemplate, ctxFor(p.featured_image, '', 0)); altFilled++; }
-    if (!p.featured_image.prompt) p.featured_image.prompt = defaultPrompt(p, '', `${p.featured_image.caption || p.featured_image.alt_text}. Wide hero composition.`);
-  }
-  for (const x of s) {
-    if (x.type === 'heading') lastHeading = x.content;
-    if (x.type !== 'image') continue;
-    k++;
-    if (!x.filename) x.filename = `${p.slug || 'post'}-inline-${k}.jpg`;
-    if (genericAlt(x.alt_text, x.filename)) { x.alt_text = fillTemplate(o.altTemplate, ctxFor(x, lastHeading, k)); altFilled++; }
-    if (!x.prompt) x.prompt = defaultPrompt(p, lastHeading, x.caption || x.alt_text);
-  }
-  if (altFilled) notes.push(`Wrote alt text for ${altFilled} image(s) from the template`);
+  // Image names + art direction first, then alt text/captions built from what each photo really shows
+  let k = 0;
+  for (const x of s) if (x.type === 'image') { k++; if (!x.filename) x.filename = `${p.slug || 'post'}-inline-${k}.jpg`; }
+  p.sections = s;
+  const imgs = [p.featured_image, ...s.filter(x => x.type === 'image')].filter(Boolean);
+  const altSeen = new Map(), capSeen = new Map();
+  for (const x of imgs) { altSeen.set(lc(x.alt_text), (altSeen.get(lc(x.alt_text)) || 0) + 1); capSeen.set(lc(x.caption), (capSeen.get(lc(x.caption)) || 0) + 1); }
+  const haveSet = new Set((o.assetNames || []).map(lc)), haveAsset = img => haveSet.has(lc(img.filename));
+  const dupAlts = o.dupAlts instanceof Set ? o.dupAlts : new Set(), dupCaps = o.dupCaps instanceof Set ? o.dupCaps : new Set();
+  if ([p.featured_image, ...s].some(x => x?.generic_prompt)) notes.push('Replaced templated image prompts with photo direction written for each section');
+  artDirect(p, o); // photoreal, people-first, section-matched, unique direction for every image
+  let altFilled = 0, capFixed = 0, lastHeading = '';
+  const truncated = a => a && a.length >= 118 && !/[.!?)"']$/.test(a.trim()) && /\s\w{1,4}$/.test(a.trim()) && !/\s(and|or|of|in|on|at|a|an|the)$/.test(a);
+  const fix = (img, section, n) => {
+    const a = String(img.alt_text || '');
+    if (genericAlt(a, img.filename) || altSeen.get(lc(a)) > 1 || dupAlts.has(lc(a)) || truncated(a)) {
+      img.alt_text = fillTemplate(o.altTemplate, { title: p.title, keyword: kw, caption: '', purpose: img.purpose, subject: haveAsset(img) ? img.subject : (img.art_alt || img.subject), section, n }); altFilled++;
+    }
+    if (img.caption && (capSeen.get(lc(img.caption)) > 1 || dupCaps.has(lc(img.caption)))) { img.caption = ''; capFixed++; }
+    if (!img.prompt) img.prompt = defaultPrompt(p, section, img.alt_text);
+  };
+  if (p.featured_image) fix(p.featured_image, '', 0);
+  k = 0;
+  for (const x of s) { if (x.type === 'heading') lastHeading = x.content; if (x.type === 'image') fix(x, lastHeading, ++k); }
+  if (altFilled) notes.push(`Rewrote ${altFilled} generic, repeated or cut-off alt text${altFilled > 1 ? 's' : ''} to describe each photo`);
+  if (capFixed) notes.push(`Removed ${capFixed} repeated caption${capFixed > 1 ? 's' : ''}`);
 
   // Stats
   const words = s.reduce((t, x) => t + countWords([x.content, x.label, ...(x.items || [])].filter(Boolean).join(' ')), 0);
@@ -322,6 +332,220 @@ function validate(p, assetNames = [], o = {}) {
   return { ok: errors.length === 0, errors, warnings, pendingImages, requiredImages: imageList(p).filter(i => !i.featured).map(i => i.filename), featured: p.featured_image?.filename || null };
 }
 
+// ---------- Visual engine: photoreal, section-matched, never-repeating image direction ----------
+// A combinatorial visual glossary. Each image gets a shot, lens, light, time of day, setting, subject, action,
+// props, palette and mood chosen from topic-matched vocabularies (several billion distinct combinations), and a
+// signature that must be unique inside the post, across the batch and against the user's recent history.
+const V_SHOTS = {
+  hero: ['wide environmental portrait', 'wide candid scene framed through a doorway', 'wide shot framed by soft foreground foliage', 'wide eye-level lifestyle scene', 'wide three-quarter scene with layered foreground and background', 'wide low-angle scene with open sky', 'wide shot along a table full of detail'],
+  mid: ['medium candid shot', 'over-the-shoulder shot', 'waist-up documentary shot', 'two-person medium shot mid-conversation', 'medium shot from a slightly high angle', 'medium shot in profile with a second person softly in frame', 'eye-level candid moment'],
+  detail: ['close-up of two people\'s hands working together', 'tight close-up of hands with the face softly visible behind', 'over-the-shoulder close-up of hands', 'close-up of a hand passing something to another person', 'close-up of hands with a warm smile just in frame']
+};
+const V_LENSES = ['35mm lens at f/2', '50mm lens at f/1.8', '85mm lens at f/1.8', '24mm lens at f/4', '28mm lens at f/2.8'];
+// Who is in the picture. Heroes favour pairs and groups (connection); every image has real people.
+const V_SOLO = ['a woman in her early thirties', 'a man in his forties', 'a woman in her fifties', 'a young man in his twenties', 'a woman in her late twenties', 'a man in his sixties', 'a woman in her forties', 'a man in his thirties', 'a grandmother in her seventies', 'a college-age woman'];
+const V_BONDS = ['a mother and her young daughter', 'a father and his teenage son', 'a grandmother and her grandson', 'two friends in their thirties', 'a couple in their sixties', 'a young married couple', 'two neighbours of different generations', 'a mentor and a younger learner', 'a small family of four', 'three friends in their twenties', 'a father and his little girl', 'two sisters in their forties', 'a grandfather and his granddaughter', 'a husband and wife in their forties'];
+const V_EMOTION = ['sharing an easy, genuine laugh', 'a quiet moment of pride in what they made', 'relief showing on their faces as it finally works', 'gentle encouragement in the way one looks at the other', 'focused, calm concentration shared between them', 'warm, unposed smiles and relaxed shoulders', 'the small joy of noticing progress together', 'a tender, reassuring touch on the shoulder', 'curious excitement, leaning in to look closer', 'the contented stillness of doing something that matters'];
+const V_LIGHT = ['warm golden-hour backlight', 'soft window light from the left', 'sunlight streaming through a window with visible warmth', 'dappled light through leaves', 'gentle morning side light', 'bright airy daylight', 'low sun rim light', 'warm lamp light with cool window fill'];
+const V_TIMES = ['early morning', 'mid-morning', 'late morning', 'midday', 'early afternoon', 'late afternoon', 'golden hour', 'dusk', 'blue hour', 'evening'];
+const V_TIME_LIGHT = {
+  morning: [['early morning', 'mid-morning', 'late morning'], ['sunlight streaming through a window with visible warmth', 'gentle morning side light', 'sunlight filtered through linen curtains', 'soft window light from the left', 'dappled light through leaves']],
+  day: [['midday', 'early afternoon'], ['bright airy daylight', 'open shade on a bright day', 'dappled light through leaves', 'soft light bounced off a white wall']],
+  late: [['late afternoon', 'golden hour'], ['warm golden-hour backlight', 'low sun rim light', 'late-afternoon light across the floor', 'dappled golden light through leaves']],
+  evening: [['dusk', 'blue hour', 'evening'], ['warm lamp light with cool window fill', 'string lights and a last glow of daylight', 'candle-warm ambient light', 'warm practical lamps against deep blue windows']]
+};
+const V_PALETTES = ['lush greens with warm wood and cream', 'sun-warmed terracotta, sage and honey', 'rich garden greens with tomato red accents', 'golden light, olive and linen white', 'fresh greens, lemon yellow and natural oak', 'deep teal, brass and warm skin tones', 'berry reds, leafy greens and rustic wood', 'soft cream, blush and fresh herb green', 'navy, camel and warm amber', 'sky blue, sand and sunlit white'];
+const V_MOODS = ['hopeful and full of life', 'warm, connected and real', 'quietly proud', 'joyful but unforced', 'calm and reassuring', 'energised and encouraging', 'tender and grounded', 'bright and welcoming'];
+const V_SETTINGS = ['a sunlit kitchen with open shelves', 'a small city balcony overflowing with plants', 'a neighbourhood park path', 'a cosy living room with a reading chair', 'a café corner table', 'a community garden', 'a farmhouse porch', 'a busy farmers market', 'a backyard patio', 'a greenhouse', 'a riverside bench', 'a dining table after breakfast', 'a rooftop terrace', 'a bright home office by a window'];
+const V_GLOSSARY = [
+  'sleep|bedtime|insomnia|rest|nap|tired|fatigue | a minimalist bedroom at dawn;a reading nook with a dim lamp;a hotel-style bed with linen sheets | stretching gently beside the bed;setting a phone face-down on the nightstand;pulling back curtains to morning light | linen sheets,herbal tea,analog alarm clock,eye mask',
+  'morning|routine|habit|wake|start the day|daily | a sunlit kitchen;a quiet balcony at sunrise;a tidy bathroom sink area | pouring coffee;writing in a notebook at the counter;opening a window to fresh air | coffee mug,open notebook,glass of water,houseplant',
+  'gratitude|thankful|journal|journaling|reflection|reflect | a window seat with cushions;a café corner table;a porch swing | writing slowly in a journal;pausing with a pen above a page;smiling while reading an old entry | leather journal,fountain pen,warm tea,dried flowers',
+  'prayer|faith|god|jesus|bible|scripture|church|spiritual|worship|devotion | a quiet church pew;a sunlit window with an open bible;a hillside at sunrise | reading scripture with a highlighter;sitting with folded hands in silence;walking toward a small chapel | open bible,wooden cross,candle,handwritten verse card',
+  'stress|anxiety|anxious|overwhelm|calm|peace|breathe|breathing|mindful|mindfulness|meditat | a bright yoga studio;a lakeside dock;a quiet park bench | breathing slowly with eyes closed;resting hands on a warm mug;watching water ripple | cushion,warm mug,soft blanket,smooth stones',
+  'money|budget|budgeting|saving|savings|finance|debt|spending|frugal | a dining table with papers;a home office desk;a grocery store aisle | reviewing a budget notebook with a calculator;sorting receipts into envelopes;comparing two price tags | calculator,receipts,cash envelopes,laptop with blurred spreadsheet',
+  'trading|trader|stock|stocks|forex|gold|xauusd|market|invest|investing|portfolio|chart | a home trading desk with two monitors;a quiet office at dawn;a café table with a laptop | studying a candlestick chart on a monitor;writing trade notes in a notebook;closing a laptop after a session | two monitors with blurred candlestick charts,notebook with handwritten levels,coffee,desk lamp',
+  'business|entrepreneur|startup|side hustle|sell|selling|marketing|brand|client|customer | a small studio workspace;a modern co-working space;a pop-up market stall | packing an order into a kraft box;sketching ideas on a whiteboard;shaking hands with a customer | kraft boxes,sticky notes,laptop,tape dispenser',
+  'career|job|work|office|interview|resume|promotion|boss|meeting|productivity|focus|procrastinat | a quiet home office by a window;a bright meeting room;a library reading room | writing a focused to-do list;working with headphones on;presenting to two colleagues | planner,headphones,laptop,wall clock',
+  'parent|parenting|mom|mother|dad|father|child|children|kids|toddler|baby|family | a cosy living room floor;a backyard lawn;a kitchen table at homework time | reading a picture book together;helping with homework;walking hand in hand | picture books,wooden toys,crayons,lunchbox',
+  'marriage|couple|relationship|husband|wife|partner|dating|love | a farmhouse porch;a riverside bench;a small dining table by candlelight | talking over coffee;laughing while cooking together;walking arm in arm | two mugs,shared blanket,cookbook,string lights',
+  'friend|friendship|community|neighbor|neighbour|lonely|loneliness|belong | a community garden;a café corner;a backyard patio | sharing a meal outdoors;planting seedlings together;talking on a park bench | shared plates,garden tools,picnic blanket,lemonade',
+  'food|meal|recipe|cook|cooking|kitchen|dinner|lunch|breakfast|nutrition|eat|eating|healthy eating | a sunlit kitchen;a farmers market;a rustic dining table | chopping fresh vegetables;plating a simple meal;choosing produce at a stall | cutting board,fresh herbs,ceramic bowls,olive oil',
+  'fitness|exercise|workout|gym|walk|walking|run|running|strength|yoga|stretch|movement | a home gym corner;a forest trail;a bright yoga studio | tying running shoes;holding a plank on a mat;walking briskly uphill | running shoes,yoga mat,water bottle,resistance band',
+  'hydration|hydrate|drink more water|dehydrat | a kitchen counter in morning light;a gym bench;a hiking trail | filling a glass bottle at the tap;slicing lemon into a pitcher;drinking during a hike | glass bottle,lemon slices,pitcher,reusable cup',
+  'vegetable|vegetables|tomato|tomatoes|harvest|veggie|kitchen garden|crop | a raised-bed backyard garden;a community allotment plot;a sunny suburban side yard;a cottage kitchen garden with a picket fence;a rooftop vegetable garden in the city;a farmhouse garden at the edge of a field | harvesting ripe tomatoes into a basket;pulling carrots and laughing at their odd shapes;tying a tomato vine to a stake;comparing two zucchini they just picked;rinsing fresh lettuce under a garden tap;carrying a full harvest basket to the kitchen | wicker harvest basket,heirloom tomatoes,garden twine,muddy boots,zucchini,fresh lettuce',
+  'seed|seeds|seedling|seedlings|sow|sowing|germinat|seed starting|seed-starting | a sunny kitchen windowsill;a basement grow-light shelf;a greenhouse bench;a garage potting table;a dining table covered in newspaper;a small cold frame by the fence | pressing seeds into soil with a fingertip;labelling seed trays together;misting tiny seedlings;checking sprouts under a grow light;thinning seedlings with small scissors;transplanting a seedling into a bigger pot | seed trays,handwritten plant labels,spray mister,seed packets,grow light,small scissors',
+  'soil|compost|composting|mulch|mulching|fertiliz|fertilis|worm|dirt | a backyard compost corner;a garden bed in early spring;a wheelbarrow beside a raised bed;a community garden compost area;a shed doorway with bags of mulch;a sunny lawn edge | turning compost with a pitchfork;spreading mulch around young plants;crumbling rich soil in their hands;showing a child an earthworm;mixing compost into a raised bed;testing soil with a simple kit | pitchfork,wheelbarrow,compost bin,garden gloves,bag of mulch,soil test kit',
+  'container|containers|pot|pots|balcony|patio|small space|small-space|apartment garden|window box|raised bed|raised-bed | a small city balcony overflowing with pots;a brick patio with mixed containers;a fire-escape herb garden;a rooftop terrace with planters;a front stoop lined with pots;an apartment window box | repotting a plant on a newspaper-covered table;arranging pots by height;watering a window box together;moving a heavy pot on a dolly;planting herbs in a railing planter;pinching back basil | terracotta pots,watering can,railing planter,potting mix,herb seedlings,trowel',
+  'indoor plant|houseplant|houseplants|indoor plants|plant care|monstera|succulent|fern | a bright living room full of houseplants;a plant-filled bathroom with a skylight;a sunny reading nook;a small apartment kitchen window;a home office with trailing pothos;a plant shop corner | wiping dust from a large leaf;checking roots while repotting;watering a fern at the sink;rotating a plant toward the light;propagating cuttings in glass jars;showing a friend a new leaf | glass propagation jars,moisture meter,plant mister,macramé hanger,ceramic planter,pruning snips',
+  'water|watering|irrigat|drought|hose|rain barrel | a backyard garden at dawn;a balcony with a rain barrel;a sunny vegetable patch;a greenhouse aisle;a front-yard flower bed;a community garden tap | checking soil moisture with a finger;watering at the base of plants;filling a watering can from a rain barrel;setting up a drip hose;laughing as a hose sprays by mistake;watering seedlings gently with a rose head | watering can with rose head,rain barrel,drip hose,moisture meter,coiled garden hose,tin bucket',
+  'pest|pests|aphid|slug|disease|weed|weeds|weeding|prune|pruning | a vegetable bed in late summer;a rose garden;a fruit tree in a backyard;a greenhouse bench;a garden path edge;a herb bed by the kitchen | inspecting the underside of a leaf together;pulling weeds side by side;pruning a shrub with care;hand-picking pests into a jar;tying up a drooping stem;pointing out a ladybug to a child | pruning shears,kneeling pad,small jar,magnifying glass,garden gloves,twine',
+  'garden|gardening|gardener|plant|plants|grow|growing|flower|flowers|bloom|native plant|pollinator|landscap|yard|backyard|seasonal|cleanup | a cottage flower garden;a pollinator meadow in a backyard;a front yard with native plants;a garden path lined with blooms;a potting shed doorway;a garden bench under a tree | planting a native flower together;cutting fresh flowers for a vase;raking leaves into a pile;kneeling to plant bulbs;watching a bee on a flower;handing a seedling across the garden fence | flower bucket,rake,bulbs,kneeling pad,fresh-cut flowers,wooden garden tools',
+  'home|declutter|clean|cleaning|organize|organise|tidy|minimal|minimalism | a bright living room;a laundry room;a tidy entryway | folding laundry into a basket;sorting items into labelled boxes;wiping a clean counter | woven baskets,labelled jars,linen towels,spray bottle',
+  'travel|trip|vacation|holiday|adventure|explore|road trip | a train window seat;a mountain overlook;a coastal road | reading a paper map;looking out a train window;packing a small suitcase | paper map,passport,suitcase,camera',
+  'nature|outdoors|hike|hiking|forest|beach|ocean|mountain|lake|sunrise|sunset | a forest trail;a beach at low tide;a mountain cabin porch | walking along the shoreline;resting on a rock at a viewpoint;touching tall grass | backpack,thermos,walking stick,wildflowers',
+  'pet|dog|cat|puppy|kitten|animal | a sunny living room;a neighbourhood park;a backyard | walking a dog on a leash;brushing a cat;playing fetch | leash,pet bowl,chew toy,soft blanket',
+  'school|student|study|studying|learn|learning|exam|homework|teacher|education|course | a library reading room;a campus lawn;a kitchen table at night | taking notes from a textbook;studying with flashcards;listening in a small class | textbooks,flashcards,highlighters,laptop',
+  'technology|phone|screen|social media|digital|app|online|internet|computer | a desk with a laptop;a couch in the evening;a café table | putting a phone in a drawer;typing on a laptop;charging devices at a station | phone,laptop,charging dock,notebook',
+  'doctor|wellness|wellbeing|well-being|self-care|self care|healing|recovery | a bright bathroom;a calm spa-like room;a park bench | applying hand cream;preparing a herbal tea;walking slowly in sunlight | herbal tea,towel,skincare bottles,journal',
+  'grief|loss|hard times|struggle|hope|resilience|healing heart|comfort | a quiet window seat on a rainy day;a hillside at dawn;a garden bench | holding a warm mug looking outside;placing flowers on a table;hugging a friend | rain-streaked window,flowers,warm mug,soft blanket',
+  'goal|goals|new year|resolution|vision board|dream|purpose|motivation | a desk with a planner;a rooftop at sunrise;a wall with pinned notes | writing goals in a planner;pinning a note to a board;looking out at the horizon | planner,pins,index cards,pen',
+  'senior|aging|retirement|grandparent|elder | a farmhouse porch;a community garden;a sunny kitchen | teaching a grandchild to bake;tending tomatoes;walking with a cane in the park | photo album,reading glasses,garden hat,tea set',
+  'teen|teenager|youth|young adult | a bedroom desk;a skate park;a school hallway | studying with headphones;talking with a parent on the stairs;riding a bike | backpack,headphones,sneakers,notebook',
+  'beauty|skin|skincare|hair|makeup|style|fashion|outfit|wardrobe | a bright bathroom vanity;a bedroom closet;a boutique fitting room | applying moisturiser;choosing a shirt from a rail;brushing hair by a mirror | skincare bottles,wooden hangers,mirror,folded knitwear',
+  'coffee|tea|cafe|café | a café counter;a home kitchen;a porch at sunrise | pouring pour-over coffee;steeping loose-leaf tea;holding a mug with both hands | ceramic mug,kettle,coffee beans,teapot',
+  'read|reading|book|books|library | a library reading room;a window seat;a park under a tree | turning a page;choosing a book from a shelf;reading under a tree | stacked books,bookmark,reading glasses,tea',
+  'music|sing|song|guitar|piano | a living room with a piano;a porch at dusk;a small studio | playing acoustic guitar;practising piano scales;singing with friends | acoustic guitar,sheet-free piano keys,headphones,vinyl records',
+  'art|creative|creativity|paint|painting|draw|drawing|craft|hobby | a sunlit art studio;a kitchen table with supplies;a park bench | painting with watercolours;sketching in a notebook;knitting in a chair | watercolour palette,brushes,sketchbook,yarn',
+  'volunteer|serve|service|give|giving|charity|help others|kindness | a food bank warehouse;a community kitchen;a neighbourhood street | packing food boxes;serving soup;carrying groceries for a neighbour | cardboard boxes,aprons,grocery bags,clipboard',
+  'car|drive|driving|commute|traffic | a car interior at dawn;a train platform;a bike lane | adjusting a rear-view mirror;reading on a commuter train;cycling to work | car keys,travel mug,bike helmet,transit card',
+  'weather|rain|winter|summer|spring|autumn|fall|season | a rain-streaked window;a snowy porch;a sunlit meadow | watching rain with a mug;shovelling a path;walking through fallen leaves | umbrella,wool scarf,rain boots,fallen leaves',
+  'real estate|house|mortgage|rent|apartment|moving|move | an empty bright apartment;a front porch with a sold sign;a living room full of boxes | carrying a moving box;holding new keys;measuring a wall | moving boxes,house keys,tape measure,paint swatches',
+  'wedding|anniversary|celebrat|party|birthday|holiday season|christmas|thanksgiving | a decorated dining room;a backyard with string lights;a church entrance | lighting candles on a table;raising glasses in a toast;wrapping a gift | string lights,candles,wrapped gifts,table linens'
+].map(line => {
+  const parts = line.split(' | '); const keys = parts[0].split('|').map(x => x.trim()).filter(Boolean);
+  const esc2 = x => x.replace(/[.*+?^${}()[\]\\]/g, '\\$&');
+  return { keys, re: new RegExp(`\\b(${keys.map(esc2).join('|')})\\w{0,3}\\b`, 'i'), settings: parts[1].split(';').map(x => x.trim()), actions: parts[2].split(';').map(x => x.trim()), props: parts[3].split(',').map(x => x.trim()) }; });
+
+
+function realism(allowText) {
+  return `Realism requirements: a genuine high-end editorial photograph indistinguishable from a real camera photo — natural skin texture, real expressions caught mid-moment (not posed, not looking at the camera), realistic hands with five fingers, correct anatomy, believable fabric, soil, food and surface textures, accurate reflections and shadows, true-to-life vibrant colour, rich layered detail from foreground to background. Not an illustration, not a cartoon, not flat vector art, not a 3D render, no plastic or airbrushed look. ${allowText ? 'The ONLY text allowed is the headline described above, spelled exactly; no other words, labels, logos, watermarks or brand names.' : 'No text, letters, numbers, captions, signage, watermarks, logos or brand names anywhere in the frame; screens show only soft blurred shapes.'}`;
+}
+function mulberry(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const wordsOf = s => new Set((String(s || '').toLowerCase().match(/[a-z]{4,}/g) || []));
+const jaccard = (a, b) => { const A = wordsOf(a), B = wordsOf(b); if (!A.size || !B.size) return 0; let i = 0; for (const x of A) if (B.has(x)) i++; return i / (A.size + B.size - i); };
+const firstSentences = (t, n = 2) => (stripHtml(t).replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+/g) || [stripHtml(t)]).slice(0, n).map(x => x.trim()).join(' ').trim();
+const isDefaultPrompt = s => !s || /^Editorial photograph for a blog article titled/.test(s) || String(s).length < 140;
+const CONTRAST_RE = /\bvs\.?\b|\bversus\b|buy and (what to )?skip|do'?s and don'?ts|\bmistakes?\b|before and after|right (way|and wrong)|\bheal\b.*\bharm\b|good (and|vs) bad/i;
+function heroHeadline(p) {
+  const t = clean0(p.hero_text || p.title);
+  const words = t.split(/\s+/);
+  if (words.length <= 7) return t;
+  const head = t.split(/[:—–-]\s/)[0];
+  return head.split(/\s+/).length <= 7 ? head : words.slice(0, 6).join(' ');
+}
+function clean0(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+
+// Text of the section an image sits in: nearest heading above + paragraphs until the next heading.
+function sectionContext(sections, idx) {
+  let h = idx; while (h >= 0 && sections[h].type !== 'heading') h--;
+  const heading = h >= 0 ? sections[h].content : '';
+  const texts = [];
+  for (let i = h + 1; i < sections.length && sections[i].type !== 'heading'; i++) if (['paragraph', 'intro', 'callout', 'list', 'checklist'].includes(sections[i].type)) texts.push(sections[i].content || (sections[i].items || []).join('. '));
+  if (!texts.length) for (let i = idx + 1; i < sections.length && texts.length < 2; i++) if (sections[i].type === 'paragraph') texts.push(sections[i].content);
+  return { heading, text: texts.join(' ') };
+}
+
+// Turn the first practical instruction in a section into a visible action ("Check moisture with a finger…" → "checking moisture with a finger…").
+const VERBS = 'add apply arrange ask bake begin block breathe build buy call carry change check choose clean clear compare cook count cover cut dig divide drink feed fill fix fold gather give grow harvest hold keep label lay lift list look make map measure mix move note open pack pair pick place plan plant pour prep prepare press prune pull put read record remove repot rinse rotate save set share sit slice sort sow spread start stir store swap take test tie track trim try turn use walk wash water weed wipe write'.split(' ');
+function ing(v) { v = v.toLowerCase(); if (/ie$/.test(v)) return v.slice(0, -2) + 'ying'; if (/[^aeiou]e$/.test(v) && v !== 'be') return v.slice(0, -1) + 'ing'; if (/^(cut|dig|set|sit|put|plan|prep|swap|trim|stir|begin|map|pat|skip|stop|drop|shop)$/.test(v)) return v + v.slice(-1) + 'ing'; return v + 'ing'; }
+const ABSTRACT = new Set('signal signals time habit habits routine approach plan step steps decision decisions idea ideas thing things way ways result results progress goal goals option options problem problems issue issues mindset system systems process adjustment change changes pattern patterns evidence anxiety'.split(' '));
+let CONCRETE = null;
+function concreteWords() {
+  if (CONCRETE) return CONCRETE;
+  CONCRETE = new Set('finger fingers hand hands soil pot pots plant plants leaf leaves seed seeds water tray trays label labels basket notebook journal phone table jar jars bed beds mulch compost hose can tomato tomatoes root roots stem stems flower flowers bowl pan shoes mat calendar receipts timer chart map sink window shelf box boxes bag bags glove gloves scissors shears trowel bucket stake twine vine fruit herbs basil lettuce carrots mug tea coffee book books pen desk laptop bottle bench fence ladder broom rake shovel spade wheelbarrow sprout sprouts seedling seedlings bulb bulbs weed weeds bloom blooms vegetables salad knife board'.split(' '));
+  for (const g of V_GLOSSARY) for (const t of [...g.props, ...g.actions]) for (const w of t.toLowerCase().match(/[a-z]{3,}/g) || []) if (!ABSTRACT.has(w) && !/ing$/.test(w) && !['garden', 'together', 'with', 'their', 'the', 'and', 'into', 'from'].includes(w)) CONCRETE.add(w);
+  return CONCRETE;
+}
+function actionFrom(text) {
+  const sents = stripHtml(String(text || '').replace(/\*\*[^*]+\*\*:?/g, ' ').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')).split(/(?<=[.!?])\s+/);
+  for (const raw of sents) {
+    const t = raw.trim().replace(/^(first|then|next|finally|instead|also|now),?\s+/i, '');
+    const w = t.split(/\s+/)[0]?.toLowerCase();
+    if (!w || !VERBS.includes(w) || /\byou\b/i.test(t.split(/\s+/).slice(1).join(' '))) continue;
+    let a = `${ing(w)} ${t.split(/\s+/).slice(1).join(' ')}`.replace(/[.!?]+$/, '').split(/[,;:—–]| so | because | instead | before | until /)[0];
+    a = a.replace(/\byour\b/gi, 'their').replace(/\byou\b/gi, 'them').replace(/\byourself\b/gi, 'themselves').trim();
+    const words = a.split(/\s+/);
+    const cw = concreteWords();
+    if (words.length >= 3 && words.length <= 12 && words.some(x => cw.has(x.toLowerCase().replace(/[^a-z]/g, '')))) return a;
+  }
+  return '';
+}
+
+function artDirect(p, o = {}) {
+  const used = o.usedSigs instanceof Set ? o.usedSigs : new Set(o.usedSignatures || []);
+  const s = p.sections || [];
+  const intro = s.find(x => x.type === 'intro')?.content || p.excerpt || '';
+  const list = [];
+  if (p.featured_image) list.push({ img: p.featured_image, role: 'hero', ctx: { heading: p.title, text: `${p.excerpt || ''} ${intro}` } });
+  s.forEach((x, i) => { if (x.type === 'image') list.push({ img: x, role: list.filter(l => l.role !== 'hero').length % 2 ? 'detail' : 'mid', ctx: sectionContext(s, i) }); });
+  const local = { settings: new Set(), times: new Set(), people: new Set(), shots: new Set(), props: new Set() };
+  const LENS_BY = { hero: ['24mm lens at f/4', '28mm lens at f/2.8', '35mm lens at f/2'], mid: ['35mm lens at f/2', '50mm lens at f/1.8', '85mm lens at f/1.8'], detail: ['50mm lens at f/2', '85mm lens at f/1.8', '100mm macro lens at f/4'] };
+  const usedEntries = new Map();
+  const entryUse = o.entryUse instanceof Map ? o.entryUse : new Map();
+  const actionUse = o.actionUse instanceof Set ? o.actionUse : new Set();
+  const briefs = [];
+  const postAll = `${(p.categories || []).join(' ')} ${(p.tags || []).join(' ')} ${s.map(x => x.content || (x.items || []).join(' ')).join(' ')}`;
+  for (const { img, role, ctx } of list) {
+    const hi = role === 'hero' ? `${p.title} ${p.primary_keyword || ''} ${img.subject || ''}` : `${img.concept || ''} ${ctx.heading} ${img.subject || ''}`;
+    const lo = role === 'hero' ? `${p.excerpt || ''} ${intro}` : ctx.text;
+    const tail = `${p.title} ${p.primary_keyword || ''} ${(p.secondary_keywords || []).join(' ')} ${(p.categories || []).join(' ')}`;
+    const count = (re, t) => (String(t).match(new RegExp(re.source, 'gi')) || []).length;
+    // broad catch-all concepts (e.g. plain "garden") count half, so the specific concept in a title wins
+    const scored = V_GLOSSARY.map(g => ({ g, score: (count(g.re, hi) * 4 + count(g.re, lo) + count(g.re, tail) * 0.5) * (g.keys[0] === 'garden' ? 0.5 : 1) + Math.min(2, count(g.re, postAll) * 0.05) - (usedEntries.get(g) || 0) * 1.5 - (entryUse.get(g) || 0) * 0.25 })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+    // rotate among close contenders so a batch on one niche still gets different scenes
+    const close = scored.filter(x => x.score >= (scored[0]?.score || 0) * 0.55).slice(0, 3);
+    const entry = role === 'hero' ? (scored[0]?.g || null) : close.length ? close[hash(`${p.post_id}|${img.filename}|entry`) % close.length].g : null;
+    if (entry) entryUse.set(entry, (entryUse.get(entry) || 0) + 1);
+    if (entry) usedEntries.set(entry, (usedEntries.get(entry) || 0) + 1);
+    let choice = null;
+    for (let salt = 0; salt < 80 && !choice; salt++) {
+      const r = mulberry(hash(`${p.post_id}|${img.filename}|${salt}`));
+      const at = a => a[Math.floor(r() * a.length)];
+      const j = entry ? Math.floor(r() * entry.settings.length) : 0;
+      const hiWords = wordsOf(hi);
+      const onTopic = entry ? entry.settings.map((x, k) => [x, k]).filter(([x]) => [...wordsOf(x)].some(w => hiWords.has(w))) : [];
+      const jj = role === 'hero' && onTopic.length && salt < 30 ? onTopic[Math.floor(r() * onTopic.length)][1] : j;
+      const setting = img.setting || (entry && salt < 40 ? entry.settings[jj] : at(V_SETTINGS));
+      let fromText = role !== 'hero' && salt < 60 ? actionFrom(ctx.text) : '';
+      if (fromText && actionUse.has(fromText.toLowerCase())) fromText = ''; // the same instruction in many posts must not become the same photo
+      const freshActs = entry ? entry.actions.filter(x => !actionUse.has(x.toLowerCase())) : [];
+      const action = fromText || (entry ? (role === 'hero' && entry.actions[jj] && !actionUse.has(entry.actions[jj].toLowerCase()) ? entry.actions[jj] : at(freshActs.length ? freshActs : entry.actions)) : 'working on it together');
+      const fresh = entry ? entry.props.filter(x => !local.props.has(x)) : [];
+      const pool2 = fresh.length >= 2 ? fresh : (entry ? entry.props : []);
+      const props = entry ? [...new Set([at(pool2), at(pool2), at(pool2)])] : [at(['a ceramic mug', 'fresh flowers', 'a notebook'])];
+      const cue = `${setting} ${action} ${role === 'hero' ? hi : ctx.heading}`;
+      const band = /morning|dawn|sunrise|breakfast|wak(e|ing)|coffee/i.test(cue) ? 'morning' : /evening|night|dusk|sunset|candle|bedtime|string lights|lamp/i.test(cue) ? 'evening' : at(['morning', 'day', 'late', 'late', 'morning', 'day']);
+      const [times, lights] = V_TIME_LIGHT[band];
+      const solo = role === 'mid' && r() < 0.3;
+      const people = img.people && !img.generic_prompt ? img.people : solo ? at(V_SOLO) : at(V_BONDS);
+      const c = {
+        kind: role, shot: img.shot || at(V_SHOTS[role].filter(x => !solo || !/two-person|two people|another person|second person/.test(x))), lens: img.lens || at(LENS_BY[role]),
+        time: img.time_of_day || at(times), light: img.lighting || at(lights), setting, people, action, props,
+        emotion: img.emotion && !img.generic_prompt ? img.emotion : at(V_EMOTION), palette: img.palette || at(V_PALETTES), mood: at(V_MOODS)
+      };
+      const sig = `${c.setting}|${c.shot}|${c.time}`.toLowerCase();
+      const clash = used.has(sig) || local.settings.has(c.setting) || local.shots.has(c.shot) || local.people.has(c.people) || local.times.has(c.time);
+      if (!clash || salt === 79) choice = { ...c, sig };
+    }
+    local.settings.add(choice.setting); local.shots.add(choice.shot); local.times.add(choice.time); local.people.add(choice.people); choice.props.forEach(x => local.props.add(x)); actionUse.add(String(choice.action).toLowerCase());
+    used.add(choice.sig);
+    const summary = clip(firstSentences(String(ctx.text).replace(/\*\*|\*|\[([^\]]+)\]\([^)]+\)/g, (m, t) => t || ''), 2), 240);
+    const cap = x => x[0].toUpperCase() + x.slice(1);
+    const scene = `${choice.people} ${choice.action}`;
+    const art = `${cap(choice.shot)}: ${scene}, ${onIn(choice.setting)} ${choice.setting}, ${choice.time}, ${choice.light}. Human connection: ${choice.emotion} — a real moment between real people, candid and unposed. Shot on a full-frame camera with a ${choice.lens}; layered composition with rich foreground detail (${choice.props.join(', ')}) and a softly detailed background. Colour: ${choice.palette}, vibrant but natural. Mood: ${choice.mood}.`;
+    const heroText = role === 'hero' && o.heroText ? heroHeadline(p) : '';
+    const contrast = role === 'hero' && CONTRAST_RE.test(p.title) ? ' Composition: a split scene with a clear, natural divide — one side bright, abundant and hopeful showing the right way, the other side darker and messier showing the wrong way, like a before-and-after magazine spread, with the people on the bright side.' : '';
+    const headline = heroText ? ` Headline: large, bold, hand-painted brush-script lettering integrated into the scene like a premium magazine cover, reading exactly "${heroText}" — spelled exactly, fully legible, placed over a calm area so no faces are covered.` : '';
+    const purpose = role === 'hero' ? `This is the featured image for "${p.title}". It must make a reader feel the article's promise at a glance: abundant, warm, human and richly detailed, working as a wide 3:2 header.${contrast}${headline}` : `This image sits inside the section "${ctx.heading}" of "${p.title}" and must show that section's specific idea through the people in it${summary ? `: ${summary}` : '.'}`;
+    const base = isDefaultPrompt(img.prompt) || img.generic_prompt ? '' : String(img.prompt).trim();
+    briefs.push({ img, base, art, purpose, sig: choice.sig, choice, heroText, scene });
+  }
+  briefs.forEach((b, i) => {
+    const others = briefs.filter((_, j) => j !== i);
+    const tooClose = b.base && others.some(x => x.base && jaccard(b.base, x.base) > 0.45);
+    const avoid = others.map(x => `${x.choice.shot} in ${x.choice.setting}`).join('; ');
+    const core = b.base ? (tooClose ? `${b.base}\nComposition override so this image is clearly different from the others: ${b.art}` : `${b.base}\nPeople and camera: ${b.art}`) : b.art;
+    b.img.render_prompt = `Photorealistic, vibrant editorial lifestyle photograph. ${core}\n${b.purpose}\nMust look clearly different from the other images in this article (${avoid || 'none'}).\n${realism(!!b.heroText)}`;
+    b.img.sig = b.sig;
+    b.img.art = { scene: b.scene, shot: b.choice.shot, setting: b.choice.setting, time_of_day: b.choice.time, lighting: b.choice.light, lens: b.choice.lens, palette: b.choice.palette, headline: b.heroText || '' };
+    b.img.art_alt = clip(`${cap1(b.scene)} ${onIn(b.choice.setting)} ${b.choice.setting}`, 95);
+  });
+  return briefs.length;
+}
+const onIn = st => /\b(balcony|porch|terrace|dock|bench|path|trail|patio|rooftop|overlook|lawn|beach|sidewalk|road|street|shoreline|hillside|pew|platform|swing)\b/i.test(st) && !/\binterior\b/i.test(st) ? 'on' : 'in';
+const cap1 = x => String(x || '').charAt(0).toUpperCase() + String(x || '').slice(1);
+
 // ---------- import ----------
 function parseCSV(text) {
   const rows = []; let row = [], cell = '', q = false;
@@ -334,6 +558,30 @@ function parseCSV(text) {
   if (cell || row.length) { row.push(cell.replace(/\r$/, '')); rows.push(row); }
   const h = (rows.shift() || []).map(x => x.trim().replace(/^\uFEFF/, ''));
   return rows.filter(r => r.some(Boolean)).map(r => Object.fromEntries(h.map((k, i) => [k, r[i] ?? ''])));
+}
+
+// Real photos carry far more detail per pixel than flat drawings made with code (the "placeholder art" ChatGPT
+// produces when it cannot generate photos). Those are dropped on import so Aura generates real photos instead.
+function imageDims(b) {
+  if (b[0] === 0x89 && b[1] === 0x50) return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), type: 'png' };
+  if (b[0] === 0xFF && b[1] === 0xD8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xFF) { i++; continue; }
+      const m = b[i + 1], len = b.readUInt16BE(i + 2);
+      if (m >= 0xC0 && m <= 0xCF && ![0xC4, 0xC8, 0xCC].includes(m)) return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7), type: 'jpeg' };
+      i += 2 + len;
+    }
+  }
+  if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return { type: 'webp' };
+  return null;
+}
+function looksPlaceholder(buf) {
+  const d = imageDims(buf);
+  if (!d?.w || !d?.h) return false;
+  const px = d.w * d.h, bpp = buf.length / px;
+  if (px < 250000) return true; // tiny images are never usable blog photos
+  return d.type === 'jpeg' ? bpp < 0.075 : d.type === 'png' ? bpp < 0.3 : false;
 }
 
 async function importEntries(entries) {
@@ -387,10 +635,34 @@ async function importEntries(entries) {
   return { rawPosts, manifestSource, assetMap };
 }
 
+// Package-level repair: ChatGPT often reuses one templated prompt / alt / caption for every post.
+function packageProfile(bases) {
+  const imgs = bases.flatMap(b => [b.featured_image, ...b.sections.filter(x => x.type === 'image')].filter(Boolean).map(i => ({ i, post: b.post_id })));
+  const count = f => { const m = new Map(); for (const { i } of imgs) { const k = lc(f(i)); if (k) m.set(k, (m.get(k) || 0) + 1); } return m; };
+  const alts = count(i => i.alt_text), caps = count(i => i.caption);
+  const dupAlts = new Set([...alts].filter(([, n]) => n > 1).map(([k]) => k)), dupCaps = new Set([...caps].filter(([, n]) => n > 1).map(([k]) => k));
+  // A prompt that is nearly the same as prompts in other posts is a template, not direction: rebuild it.
+  const strip = (t, b) => { let x = String(t || ''); for (const w of [b.title, b.primary_keyword, ...(b.secondary_keywords || [])].filter(Boolean)) x = x.split(w).join(' '); return x; };
+  const byPost = new Map(bases.map(b => [b.post_id, b]));
+  let generic = 0;
+  const sample = imgs.slice(0, 400);
+  for (const a of sample) {
+    if (!a.i.prompt) continue;
+    const ta = strip(a.i.prompt, byPost.get(a.post));
+    const twins = sample.filter(b => b.post !== a.post && b.i.prompt && jaccard(ta, strip(b.i.prompt, byPost.get(b.post))) > 0.7).length;
+    if (twins >= 2) { a.i.generic_prompt = true; generic++; }
+  }
+  return { dupAlts, dupCaps, generic };
+}
+
 function preparePosts(rawPosts, assetNames, options) {
   const seen = new Set();
-  return rawPosts.map(raw => {
-    const base = normalizePost(raw);
+  const bases = rawPosts.map(raw => normalizePost(raw));
+  const prof = packageProfile(bases);
+  options = { ...options, assetNames, heroText: options.heroText !== false, dupAlts: prof.dupAlts, dupCaps: prof.dupCaps, entryUse: new Map(), actionUse: new Set(), usedSigs: new Set(Array.isArray(options.usedSignatures) ? options.usedSignatures.slice(-2000) : []) };
+  return rawPosts.map((raw, ri) => {
+    const base = bases[ri];
+    if ([base.featured_image, ...base.sections].some(x => x?.generic_prompt)) base._genericPrompts = true;
     const p = applyStandard(base, options);
     p.source = base; // kept so the standard can be re-applied cleanly when settings change
     p.validation = validate(p, assetNames, options);
@@ -403,56 +675,198 @@ function preparePosts(rawPosts, assetNames, options) {
 const readJson = v => { try { return typeof v === 'string' ? JSON.parse(v || '{}') : (v || {}); } catch { return {}; } };
 
 // ---------- rendering (Gutenberg blocks) ----------
-function inline(s) {
-  let t = esc(s);
-  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, a, u) => `<a href="${u}">${a}</a>`);
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-  return t;
-}
 const block = (name, html, attrs) => `<!-- wp:${name}${attrs ? ' ' + JSON.stringify(attrs) : ''} -->\n${html}\n<!-- /wp:${name} -->`;
 
-function resolveAd(sec, adIndex, p, o) {
-  const lib = (o.ads || []).filter(a => a && a.enabled !== false && (a.url || a.html));
-  const fromLib = lib.find(a => a.slot && a.slot === sec.slot) || (lib.length ? lib[(hash(p.slug || p.title) + adIndex) % lib.length] : null);
-  if (sec.html) return { html: sec.html };
-  if (sec.url) return { ...(fromLib || {}), ...Object.fromEntries(Object.entries(sec).filter(([, v]) => v)), html: '' };
-  return fromLib;
+// ---------- Ad placement engine (non-invasive: top, side, in-content, text links, end list) ----------
+const AD_DEFAULTS = { top: true, topPosition: 'after-intro', side: true, sideMax: 2, textLinks: true, textLinkMax: 3, end: true, endMax: 3, disclosure: true,
+  disclosureText: 'This post contains affiliate links. If you buy through them, we may earn a small commission at no extra cost to you.', wordsPerAd: 350 };
+const AD_REL = 'sponsored nofollow noopener';
+// Scoped CSS. Only sent when the WordPress user has unfiltered_html (otherwise WordPress would strip the tag).
+const AD_CSS = `.aura-ad a{text-decoration:none}.aura-ad a:hover{text-decoration:underline}
+@media (min-width:960px){.aura-ad--side{float:right!important;width:260px!important;max-width:42%!important;margin:.3em 0 1.2em 28px!important}}
+.aura-ad--side~h2,.aura-ad--side~h3,.aura-ad--side~figure,.aura-ad--side~.aura-ad--inline,.aura-ad--side~.aura-ad--end,.aura-ad--side~.aura-checklist{clear:both}
+@media (max-width:600px){.aura-ad--top{flex-direction:column;align-items:flex-start!important}}`;
+const STOPW = new Set('the and for with your you that this from have are was were will what when how why who which their them they our out about into more most very just than then also can could should would been being over under after before other some such only each every much many these those here there where while best good great need make made take time help'.split(' '));
+const toks = s => (String(s || '').toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(w => !STOPW.has(w)).map(w => w.replace(/ies$/, 'y').replace(/(ing|es|s)$/, ''));
+const escRe = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function normLib(ads) {
+  return (ads || []).filter(a => a && a.enabled !== false && (a.url || a.html)).map((a, i) => {
+    const kwPhrases = [...new Set(arr(a.keywords).map(x => x.toLowerCase()).filter(x => x.length > 2))];
+    const pl = arr(a.placements).map(x => x.toLowerCase());
+    return { ...a, id: slug(a.id || a.name || a.label || `ad-${i + 1}`), kwPhrases,
+      kwTok: new Set(toks([a.name, a.label, a.category, a.text, ...kwPhrases].join(' '))),
+      placements: new Set(pl.length ? pl : ['top', 'side', 'inline', 'text', 'end']) };
+  });
 }
-function renderAd(ad, sec, o) {
-  if (!ad) return block('html', `<!-- AURA:AD:${esc(sec.slot)} --><div class="aura-ad-slot" data-slot="${esc(sec.slot)}"></div>`);
-  if (ad.html) return block('html', `<div class="aura-ad aura-ad-code" data-slot="${esc(sec.slot)}">${ad.html}</div>`);
-  const url = esc(ad.url), label = esc(o.adLabel || 'Sponsored');
-  const img = ad.image ? `<a href="${url}" target="_blank" rel="sponsored noopener"><img src="${esc(ad.image)}" alt="${esc(ad.label || 'Sponsored offer')}" style="width:100%;height:auto;border-radius:10px;margin:0 0 12px" loading="lazy"></a>` : '';
-  return block('html', `<aside class="aura-ad" data-slot="${esc(sec.slot)}" style="margin:2em 0;padding:18px 20px;border:1px solid #dfe6ef;border-radius:14px;background:#f7f9fc">
-<p style="margin:0 0 8px;font-size:12px;letter-spacing:.06em;color:#667085">${label}</p>${img}
-<p style="margin:0 0 8px;font-size:1.15em;font-weight:700"><a href="${url}" target="_blank" rel="sponsored noopener">${esc(ad.label || 'Recommended resource')}</a></p>
-${ad.text ? `<p style="margin:0 0 14px">${esc(ad.text)}</p>` : ''}<p style="margin:0"><a href="${url}" target="_blank" rel="sponsored noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;background:#0d64bc;color:#fff;text-decoration:none;font-weight:600">${esc(ad.cta || 'Learn more')}</a></p>
-</aside>`);
+function relevance(ad, text) {
+  const low = String(text).toLowerCase(), tk = new Set(toks(text)); let sc = 0;
+  for (const ph of ad.kwPhrases) if (new RegExp(`\\b${escRe(ph)}`, 'i').test(low)) sc += 3;
+  for (const t of ad.kwTok) if (tk.has(t)) sc += 1;
+  return sc;
 }
-function renderPost(p, media, o = {}) {
-  let adIndex = 0;
-  return p.sections.map((s, i) => {
-    const prev = p.sections[i - 1];
-    switch (s.type) {
-      case 'heading': return s.level === 2 ? block('heading', `<h2 class="wp-block-heading">${inline(s.content)}</h2>`) : block('heading', `<h${s.level} class="wp-block-heading">${inline(s.content)}</h${s.level}>`, { level: s.level });
-      case 'intro': return block('paragraph', `<p class="aura-intro">${inline(s.content)}</p>`, { className: 'aura-intro' });
-      case 'image': {
-        const m = media[lc(s.filename)];
-        if (!m) return `<!-- AURA:MISSING:${esc(s.filename)} -->`;
-        const cap = s.caption ? `<figcaption class="wp-element-caption">${esc(s.caption)}</figcaption>` : '';
-        return block('image', `<figure class="wp-block-image size-large"><img src="${esc(m.source_url)}" alt="${esc(s.alt_text)}" class="wp-image-${m.id}"/>${cap}</figure>`, { id: m.id, sizeSlug: 'large', linkDestination: 'none' });
-      }
-      case 'ad': return renderAd(resolveAd(s, adIndex++, p, o), s, o);
-      case 'list': { const tag = s.ordered ? 'ol' : 'ul'; return block('list', `<${tag} class="wp-block-list">${s.items.map(x => `<!-- wp:list-item -->\n<li>${inline(x)}</li>\n<!-- /wp:list-item -->`).join('\n')}</${tag}>`, s.ordered ? { ordered: true } : null); }
-      case 'checklist': {
-        const title = s.title && prev?.type !== 'heading' ? block('heading', `<h2 class="wp-block-heading">${inline(s.title)}</h2>`) + '\n\n' : '';
-        return title + block('html', `<ul class="aura-checklist" style="list-style:none;padding-left:0">${s.items.map(x => `<li style="margin:.55em 0;padding-left:1.8em;position:relative"><span aria-hidden="true" style="position:absolute;left:0">☐</span>${inline(x)}</li>`).join('')}</ul>`);
-      }
-      case 'callout': return block('html', `<aside class="aura-callout" style="margin:1.6em 0;padding:16px 20px;border-left:4px solid #0d64bc;background:#f2f7fd;border-radius:8px">${s.label ? `<p style="margin:0 0 6px;font-weight:700">${esc(s.label)}</p>` : ''}<p style="margin:0">${inline(s.content)}</p></aside>`);
-      case 'html': return block('html', s.content);
-      default: return block('paragraph', `<p>${inline(s.content)}</p>`);
+const nonEmpty = (o, ks) => Object.fromEntries(ks.filter(k => o[k]).map(k => [k, o[k]]));
+
+function planAds(p, o = {}) {
+  const L = { ...AD_DEFAULTS, ...(o.adLayout || {}) };
+  const lib = normLib(o.ads), byId = new Map(lib.map(a => [a.id, a]));
+  const s = p.sections || [];
+  const postText = [p.title, p.primary_keyword, ...(p.secondary_keywords || []), ...(p.categories || []), ...(p.tags || [])].join(' ');
+  const uses = new Map(), use = a => a?.id && uses.set(a.id, (uses.get(a.id) || 0) + 1);
+  const choose = (text, place, { exclude = new Set(), minScore = -Infinity, minRel = 0 } = {}) => {
+    const c = lib.filter(a => a.placements.has(place) && !exclude.has(a.id) && (!minRel || relevance(a, `${text} ${postText}`) >= minRel)).map(a => ({ a, sc: relevance(a, `${text} ${postText}`) * 2 + relevance(a, text) - (uses.get(a.id) || 0) * 5 + (hash(`${p.slug}|${a.id}|${place}`) % 97) / 1000 }))
+      .filter(x => x.sc >= minScore).sort((x, y) => y.sc - x.sc);
+    return c[0]?.a || null;
+  };
+  const secText = i => { const c = sectionContext(s, i); return `${c.heading} ${c.text}`; };
+  const words = p.standard?.stats?.words || countWords(s.map(x => [x.content, ...(x.items || [])].join(' ')).join(' '));
+  let budget = Math.max(2, Math.round(words / Math.max(150, Number(L.wordsPerAd) || 350)));
+  const plan = { L, lib, byId, top: null, topAt: -1, side: new Map(), inline: new Map(), end: [], uses };
+
+  // 1. Ad sections written into the post (the standard's two slots + any placed by ChatGPT)
+  s.forEach((x, i) => {
+    if (x.type !== 'ad') return;
+    let ad = null;
+    if (x.html) ad = { html: x.html };
+    else if (x.ad_id && byId.get(slug(x.ad_id))) ad = { ...byId.get(slug(x.ad_id)), ...nonEmpty(x, ['label', 'text', 'cta']) };
+    else if (x.url) ad = { ...x };
+    else { const place = x.placement === 'side' ? 'side' : 'inline'; ad = choose(secText(i), place, { exclude: new Set([...uses.keys()]) }) || choose(secText(i), place); }
+    use(ad); plan.inline.set(i, { ad, kind: x.placement === 'side' ? 'side' : 'inline' }); budget--;
+  });
+  if (!lib.length) return plan;
+  const intro = s.findIndex(x => x.type === 'intro');
+  // 2. Slim banner near the top
+  if (L.top && budget > 0) {
+    const topText = `${p.title} ${intro > -1 ? s[intro].content : ''}`;
+    const a = choose(topText, 'top', { exclude: new Set([...uses.keys()]), minRel: 2 }) || choose(topText, 'top', { minRel: 2 });
+    if (a) { plan.top = a; plan.topAt = L.topPosition === 'before-intro' ? -1 : Math.max(0, intro); use(a); budget--; }
+  }
+  // 3. Side cards beside long, ad-free H2 sections, spaced apart
+  if (L.side && budget > 0) {
+    const adIdx = [...plan.inline.keys(), plan.topAt];
+    const cands = [];
+    s.forEach((x, i) => {
+      if (x.type !== 'heading' || x.level !== 2 || TAKEAWAY_RE.test(x.content) || /checklist/i.test(x.content)) return;
+      let end = i + 1; while (end < s.length && !(s[end].type === 'heading' && s[end].level === 2)) end++;
+      const body = s.slice(i + 1, end);
+      if (body.some(b => ['ad', 'checklist'].includes(b.type))) return;
+      if (countWords(body.map(b => b.content || (b.items || []).join(' ')).join(' ')) < 150) return;
+      if (adIdx.some(k => Math.abs(k - i) <= 2)) return;
+      cands.push(i);
+    });
+    const picked = [];
+    for (const i of cands.map(i => ({ i, a: choose(secText(i), 'side', { exclude: new Set([...uses.keys()]), minRel: 2 }) })).filter(x => x.a).sort((x, y) => relevance(y.a, secText(y.i)) - relevance(x.a, secText(x.i)))) {
+      if (picked.length >= Math.min(Number(L.sideMax) || 0, budget)) break;
+      if (picked.some(k => Math.abs(k - i.i) < 4) || (uses.get(i.a.id) || 0) > 0) continue;
+      picked.push(i.i); plan.side.set(i.i, i.a); use(i.a); budget--;
     }
-  }).join('\n\n');
+  }
+  // 4. Short "Recommended resources" list at the very end (relevant or already-featured ads only)
+  if (L.end) {
+    const all = `${postText} ${s.map(x => x.content || '').join(' ')}`;
+    const phraseHits = a => a.kwPhrases.filter(ph => new RegExp(`\\b${escRe(ph)}`, 'i').test(all)).length;
+    plan.end = lib.filter(a => a.placements.has('end') && a.url && (uses.has(a.id) || phraseHits(a) >= 2))
+      .sort((a, b) => phraseHits(b) - phraseHits(a)).slice(0, Math.max(0, Number(L.endMax) || 0));
+    if (plan.end.length < 2) plan.end = [];
+  }
+  return plan;
+}
+
+// Inline markdown + affiliate links: [anchor](aff:ID) resolves from the library; keywords auto-link sparingly.
+function inlineRich(s, rc, allowAuto) {
+  let t = esc(s);
+  t = t.replace(/\[([^\]]+)\]\(aff:([\w.-]+)\)/g, (m, a, id) => {
+    const ad = rc?.plan.byId.get(slug(id));
+    if (!ad?.url) return a;
+    rc.affiliate = true; rc.linked.add(ad.id); rc.linksUsed++;
+    return `<a href="${esc(ad.url)}" target="_blank" rel="${AD_REL}">${a}</a>`;
+  });
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, a, u) => `<a href="${u}">${a}</a>`);
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  if (!allowAuto || !rc || !rc.plan.L.textLinks || rc.linksUsed >= rc.plan.L.textLinkMax || /aff:|rel="sponsored/.test(t)) return t;
+  // one automatic link per paragraph, first natural mention of an ad keyword, never inside another link
+  for (const ad of rc.plan.lib) {
+    if (!ad.url || !ad.placements.has('text') || rc.linked.has(ad.id)) continue;
+    const phrases = [...ad.kwPhrases.filter(ph => ph.includes(' ')), ...(ad.name && ad.name.length > 3 ? [ad.name.toLowerCase()] : [])];
+    for (const ph of phrases) {
+      const re = new RegExp(`(^|[^\\w-])(${escRe(esc(ph))})(?=[^\\w-]|$)`, 'i');
+      let done = false;
+      t = t.split(/(<a\b[^>]*>.*?<\/a>|<[^>]+>)/s).map(seg => {
+        if (done || seg.startsWith('<')) return seg;
+        return seg.replace(re, (m, pre, word) => { done = true; return `${pre}<a href="${esc(ad.url)}" target="_blank" rel="${AD_REL}">${word}</a>`; });
+      }).join('');
+      if (done) { rc.linked.add(ad.id); rc.linksUsed++; rc.affiliate = true; return t; }
+    }
+  }
+  return t;
+}
+
+const adLabel = o => esc(o.adLabel || 'Sponsored');
+function adUnit(ad, kind, o, slotName = '') {
+  const slotAttr = slotName ? ` data-slot="${esc(slotName)}"` : '';
+  if (!ad) return block('html', `<!-- AURA:AD:${esc(slotName)} --><div class="aura-ad-slot"${slotAttr}></div>`);
+  if (ad.html) return block('html', `<div class="aura-ad aura-ad--code aura-ad--${kind}"${slotAttr}>${ad.html}</div>`);
+  const url = esc(ad.url), head = esc(ad.label || ad.name || 'Recommended resource'), cta = esc(ad.cta || 'Learn more');
+  const a = (inner, extra = '') => `<a href="${url}" target="_blank" rel="${AD_REL}"${extra}>${inner}</a>`;
+  const small = `<span style="display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#667085;margin:0 0 6px">${adLabel(o)}</span>`;
+  const btn = a(`${cta}`, ` class="aura-ad__cta" style="display:inline-block;padding:9px 16px;border-radius:999px;background:#0d64bc;color:#fff;font-weight:600;font-size:.95em"`);
+  if (kind === 'top') return block('html', `<aside class="aura-ad aura-ad--top"${slotAttr} style="margin:1.2em 0 1.6em;padding:12px 16px;border:1px solid #e3e8ef;border-radius:12px;background:#f8fafc;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:.95em">
+<span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#667085">${adLabel(o)}</span>${a(`<strong>${head}</strong>`)}${ad.text ? `<span style="color:#475467">${esc(clip(ad.text, 110))}</span>` : ''}${a(`${cta} →`, ' class="aura-ad__cta" style="font-weight:600;margin-left:auto"')}</aside>`);
+  const img = ad.image ? a(`<img src="${esc(ad.image)}" alt="${head}" loading="lazy" style="width:100%;height:auto;border-radius:10px;margin:0 0 10px">`) : '';
+  if (kind === 'side') return block('html', `<aside class="aura-ad aura-ad--side"${slotAttr} style="margin:1.5em auto;max-width:420px;padding:16px 18px;border:1px solid #e3e8ef;border-radius:14px;background:#f8fafc;font-size:.95em">
+${small}${img}<p style="margin:0 0 6px;font-weight:700;line-height:1.3">${a(head)}</p>${ad.text ? `<p style="margin:0 0 12px;color:#475467">${esc(clip(ad.text, 140))}</p>` : ''}<p style="margin:0">${btn}</p></aside>`);
+  return block('html', `<aside class="aura-ad aura-ad--inline"${slotAttr} style="margin:2em 0;padding:18px 20px;border:1px solid #e3e8ef;border-radius:14px;background:#f8fafc">
+${small}${img}<p style="margin:0 0 8px;font-size:1.15em;font-weight:700">${a(head)}</p>${ad.text ? `<p style="margin:0 0 14px">${esc(ad.text)}</p>` : ''}<p style="margin:0">${btn}</p></aside>`);
+}
+function endList(ads, o) {
+  return block('html', `<aside class="aura-ad aura-ad--end" style="margin:2.4em 0 1em;padding:16px 0 0;border-top:1px solid #e3e8ef">
+<p style="margin:0 0 8px;font-weight:700">Recommended resources</p><ul style="margin:0;padding-left:1.1em">${ads.map(a => `<li style="margin:.35em 0"><a href="${esc(a.url)}" target="_blank" rel="${AD_REL}">${esc(a.label || a.name)}</a>${a.text ? ` — ${esc(clip(a.text, 100))}` : ''}</li>`).join('')}</ul>
+<p style="margin:.6em 0 0;font-size:12px;color:#667085">${adLabel(o)} links</p></aside>`);
+}
+
+function renderPost(p, media, o = {}) {
+  const plan = planAds(p, o), L = plan.L;
+  const rc = { plan, linked: new Set(), linksUsed: 0, affiliate: false };
+  // Links ChatGPT placed on purpose ([text](aff:ID)) win: those ads are never auto-linked a second time.
+  for (const x of p.sections || []) for (const m of String([x.content, ...(x.items || [])].join(' ')).matchAll(/\]\(aff:([\w.-]+)\)/g)) { const ad = plan.byId.get(slug(m[1])); if (ad) rc.linked.add(ad.id); }
+  const out = [], s = p.sections;
+  const stats = { top: 0, side: 0, inline: 0, end: 0, textLinks: 0 };
+  const unit = (ad, kind, slot) => { if (ad?.url) rc.affiliate = true; stats[kind === 'side' ? 'side' : kind]++; return adUnit(ad, kind, o, slot); };
+  if (plan.top && plan.topAt === -1) out.push(unit(plan.top, 'top'));
+  s.forEach((x, i) => {
+    const prev = s[i - 1];
+    switch (x.type) {
+      case 'heading': out.push(x.level === 2 ? block('heading', `<h2 class="wp-block-heading">${inlineRich(x.content, rc, false)}</h2>`) : block('heading', `<h${x.level} class="wp-block-heading">${inlineRich(x.content, rc, false)}</h${x.level}>`, { level: x.level })); break;
+      case 'intro': out.push(block('paragraph', `<p class="aura-intro">${inlineRich(x.content, rc, false)}</p>`, { className: 'aura-intro' })); break;
+      case 'image': {
+        const m = media[lc(x.filename)];
+        if (!m) { out.push(`<!-- AURA:MISSING:${esc(x.filename)} -->`); break; }
+        const cap = x.caption ? `<figcaption class="wp-element-caption">${esc(x.caption)}</figcaption>` : '';
+        out.push(block('image', `<figure class="wp-block-image size-large"><img src="${esc(m.source_url)}" alt="${esc(x.alt_text)}" class="wp-image-${m.id}"/>${cap}</figure>`, { id: m.id, sizeSlug: 'large', linkDestination: 'none' }));
+        break;
+      }
+      case 'ad': { const u = plan.inline.get(i); out.push(unit(u?.ad, u?.kind || 'inline', x.slot)); break; }
+      case 'list': { const tag = x.ordered ? 'ol' : 'ul'; out.push(block('list', `<${tag} class="wp-block-list">${x.items.map(it => `<!-- wp:list-item -->\n<li>${inlineRich(it, rc, false)}</li>\n<!-- /wp:list-item -->`).join('\n')}</${tag}>`, x.ordered ? { ordered: true } : null)); break; }
+      case 'checklist': {
+        if (x.title && prev?.type !== 'heading') out.push(block('heading', `<h2 class="wp-block-heading">${inlineRich(x.title, rc, false)}</h2>`));
+        out.push(block('html', `<ul class="aura-checklist" style="list-style:none;padding-left:0">${x.items.map(it => `<li style="margin:.55em 0;padding-left:1.8em;position:relative"><span aria-hidden="true" style="position:absolute;left:0">☐</span>${inlineRich(it, rc, false)}</li>`).join('')}</ul>`));
+        break;
+      }
+      case 'callout': out.push(block('html', `<aside class="aura-callout" style="margin:1.6em 0;padding:16px 20px;border-left:4px solid #0d64bc;background:#f2f7fd;border-radius:8px">${x.label ? `<p style="margin:0 0 6px;font-weight:700">${esc(x.label)}</p>` : ''}<p style="margin:0">${inlineRich(x.content, rc, false)}</p></aside>`)); break;
+      case 'html': out.push(block('html', x.content)); break;
+      default: out.push(block('paragraph', `<p>${inlineRich(x.content, rc, true)}</p>`));
+    }
+    if (plan.top && plan.topAt === i) out.push(unit(plan.top, 'top'));
+    if (plan.side.has(i)) out.push(unit(plan.side.get(i), 'side'));
+  });
+  if (plan.end.length) { out.push(endList(plan.end, o)); stats.end = plan.end.length; rc.affiliate = true; }
+  stats.textLinks = rc.linksUsed;
+  const head = [];
+  if (o.css && (stats.side || stats.top)) head.push(block('html', `<style>${AD_CSS}</style>`));
+  if (L.disclosure && rc.affiliate) head.push(block('paragraph', `<p class="aura-disclosure" style="font-size:13px;color:#667085;font-style:italic">${esc(L.disclosureText)}</p>`, { className: 'aura-disclosure' }));
+  const html = [...head, ...out].join('\n\n');
+  if (o.withStats) return { html, stats };
+  return html;
 }
 
 // ---------- terms & media ----------
@@ -485,7 +899,7 @@ async function uploadMedia(w, file, meta) {
 }
 
 // ---------- routes ----------
-const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'] } });
+const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true } });
 app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V11 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
@@ -514,13 +928,15 @@ app.post('/api/import', upload.array('files', 200), async (req, res) => {
     }
     if (!entries.length) return res.status(400).json({ error: 'Choose at least one file or ZIP package.' });
     const { rawPosts, manifestSource, assetMap } = await importEntries(entries);
+    const rejected = [];
+    if (options.rejectPlaceholders !== false) for (const [k, a] of assetMap) if (looksPlaceholder(a.buffer)) { rejected.push(a.name); assetMap.delete(k); }
     const extra = Array.isArray(options.existingAssets) ? options.existingAssets : [];
     const names = [...assetMap.values()].map(a => a.name);
     const posts = preparePosts(rawPosts, [...names, ...extra], options);
     res.json({
-      protocolVersion: PROTOCOL, manifestSource, posts,
+      protocolVersion: PROTOCOL, manifestSource, posts, rejectedImages: rejected,
       assets: [...assetMap.values()].map(a => ({ name: a.name, mime: a.mime, size: a.buffer.length, dataBase64: a.buffer.toString('base64') })),
-      summary: { posts: posts.length, assets: names.length, ready: posts.filter(p => p.validation.ok).length, invalid: posts.filter(p => !p.validation.ok).length, pendingImages: posts.reduce((t, p) => t + p.validation.pendingImages.length, 0) }
+      summary: { posts: posts.length, assets: names.length, ready: posts.filter(p => p.validation.ok).length, rejectedImages: rejected.length, invalid: posts.filter(p => !p.validation.ok).length, pendingImages: posts.reduce((t, p) => t + p.validation.pendingImages.length, 0) }
     });
   } catch (e) { res.status(400).json({ error: `Import failed: ${e.message}` }); }
 });
@@ -529,9 +945,12 @@ app.post('/api/import', upload.array('files', 200), async (req, res) => {
 app.post('/api/standardize', (req, res) => {
   try {
     const { posts = [], options = {}, assetNames = [] } = req.body || {};
+    const all = new Set(Array.isArray(options.usedSignatures) ? options.usedSignatures.slice(-2000) : []);
     const out = posts.slice(0, 500).map(p => {
       const base = normalizePost(p.source || p);
-      const s = applyStandard(base, options);
+      const own = [p.featured_image, ...(p.sections || [])].map(x => x?.sig).filter(Boolean);
+      own.forEach(x => all.delete(x)); // a post may keep its own earlier choices
+      const s = applyStandard(base, { ...options, assetNames, heroText: options.heroText !== false, usedSigs: all });
       s.source = base;
       s.validation = validate(s, assetNames, options);
       return { ...s, wp: p.wp, target: p.target };
@@ -548,7 +967,7 @@ app.post('/api/images/generate', imageLimiter, async (req, res) => {
   const name = asciiName(filename || 'aura-image.jpg');
   const ext = name.toLowerCase().split('.').pop();
   const format = ext === 'png' ? 'png' : ext === 'webp' ? 'webp' : 'jpeg';
-  const fullPrompt = `${prompt}\n\nVisual style: ${style || 'Photorealistic editorial photography, natural light, authentic real people and settings, shallow depth of field, warm and hopeful mood.'}\nStrict rules: no text, no letters, no captions, no watermarks, no logos, no brand names, no UI screenshots.`.slice(0, 30000);
+  const fullPrompt = `${prompt}\n\nOverall visual style: ${style || 'Photorealistic editorial photography, natural light, authentic real people and settings, shallow depth of field, warm and hopeful mood.'}${/Realism requirements/.test(prompt) ? '' : '\nStrict rules: photorealistic, no text, no letters, no captions, no watermarks, no logos, no brand names, no UI screenshots, realistic hands and faces.'}`.slice(0, 30000);
   const dalle = /^dall-e/i.test(IMAGE_MODEL);
   const body = dalle
     ? { model: IMAGE_MODEL, prompt: fullPrompt.slice(0, 3900), n: 1, size: '1792x1024', response_format: 'b64_json' }
@@ -575,6 +994,19 @@ app.post('/api/images/generate', imageLimiter, async (req, res) => {
   }
 });
 
+// Exact WordPress HTML for the in-app preview (images point at aura-asset:<filename>).
+app.post('/api/preview', (req, res) => {
+  try {
+    const { post = {}, options = {} } = req.body || {};
+    const p = normalizePost(post);
+    p.standard = post.standard;
+    const media = Object.fromEntries(imageList(p).map(i => [lc(i.filename), { id: 0, source_url: `aura-asset:${i.filename}` }]));
+    const r = renderPost(p, media, { ...options, css: true, withStats: true });
+    res.json({ ok: true, html: r.html, placements: r.stats });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/ad-css', (q, r) => r.type('text/css').send(AD_CSS));
+
 app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
   try {
     const w = readJson(req.body.wordpress), o = readJson(req.body.options), raw = readJson(req.body.post);
@@ -590,8 +1022,9 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
     if (status === 'future' && !date) return res.status(422).json({ error: 'Pick a date and time to schedule this post.' });
 
     const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
+    const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,capabilities').catch(() => ({}));
+    o.css = !!me.capabilities?.unfiltered_html; // side-card CSS only when WordPress keeps <style>
     if (['publish', 'future', 'private'].includes(status)) {
-      const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,capabilities');
       if (me.capabilities && !me.capabilities.publish_posts) return res.status(403).json({ error: 'This WordPress user can only save drafts (the role lacks publish_posts). Use an Author/Editor/Administrator account, or choose "Pending review".', code: 'cannot_publish' });
     }
 
@@ -613,7 +1046,8 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
     for (const x of p.categories) { const id = await termId(creds, 'categories', x, cache); if (id) cats.push(id); }
     for (const x of p.tags) { const id = await termId(creds, 'tags', x, cache); if (id) tags.push(id); }
     const featured = p.featured_image?.filename ? media[lc(p.featured_image.filename)]?.id || 0 : 0;
-    const body = { title: p.title, slug: p.slug, excerpt: p.excerpt, content: renderPost(p, media, o), status, categories: cats, tags, featured_media: featured };
+    const rendered = renderPost(p, media, { ...o, withStats: true });
+    const body = { title: p.title, slug: p.slug, excerpt: p.excerpt, content: rendered.html, status, categories: cats, tags, featured_media: featured };
     if (date) body.date = date;
 
     // Upsert: update the same WordPress post instead of creating duplicates.
@@ -626,7 +1060,7 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
       }
     }
     const out = await wpFetch(creds, target ? `posts/${target}` : 'posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    res.json({ ok: true, id: out.id, link: out.link, status: out.status, updated: !!target, uploadedImages: uploaded, reusedImages: reused,
+    res.json({ ok: true, id: out.id, link: out.link, status: out.status, updated: !!target, uploadedImages: uploaded, reusedImages: reused, placements: rendered.stats, sideCss: o.css,
       media: Object.fromEntries(imageList(p).map(i => [i.filename, media[lc(i.filename)]]).filter(([, m]) => m)) });
   } catch (e) { const o = wpError(e); res.status(o.status === 401 ? 401 : 400).json(o); }
 });
@@ -634,5 +1068,5 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
 app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req.path }));
 app.use((e, q, r, n) => r.status(e.status === 413 || e.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: e.message }));
 
-export { normalizePost, applyStandard, validate, renderPost };
+export { normalizePost, applyStandard, validate, renderPost, planAds, artDirect };
 if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V11 (API ${API_VERSION}) listening on ${PORT}`));
