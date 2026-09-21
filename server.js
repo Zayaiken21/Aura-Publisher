@@ -17,14 +17,98 @@ function validate(p,assetNames=[]){const errors=[],warnings=[];if(!p.post_id)err
 function parseCSV(text){const rows=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const c=text[i];if(q){if(c==='"'&&text[i+1]==='"'){cell+='"';i++}else if(c==='"')q=false;else cell+=c}else if(c==='"')q=true;else if(c===','){row.push(cell);cell=''}else if(c==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell=''}else cell+=c}if(cell||row.length){row.push(cell.replace(/\r$/,''));rows.push(row)}const h=(rows.shift()||[]).map(x=>x.trim());return rows.filter(r=>r.some(Boolean)).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])))}
 const mimeFor=n=>n.endsWith('.png')?'image/png':n.endsWith('.webp')?'image/webp':'image/jpeg';
 function parseManifestObject(j){return Array.isArray(j)?j:(Array.isArray(j.posts)?j.posts:[j])}
-async function importEntries(entries){let rawPosts=[],assetMap=new Map();for(const e of entries){const n=e.name.toLowerCase(),b=e.buffer;if(/\.(png|jpe?g|webp)$/i.test(n)){assetMap.set(e.name.split('/').pop(),{name:e.name.split('/').pop(),mime:mimeFor(n),buffer:b});continue}if(n.endsWith('.json')){const j=JSON.parse(b.toString());rawPosts.push(...parseManifestObject(j));continue}if(n.endsWith('.csv')){rawPosts.push(...parseCSV(b.toString()));continue}if(n.endsWith('.md')||n.endsWith('.txt')||n.endsWith('.html')){const t=b.toString(),title=t.split(/\r?\n/).find(Boolean)?.replace(/^#+\s*/,'')||e.name;rawPosts.push({post_id:e.name.replace(/\..+$/,''),title,sections:[{type:n.endsWith('.html')?'html':'paragraph',content:t}],status:'draft'});continue}if(n.endsWith('.docx')){const x=await mammoth.convertToHtml({buffer:b});rawPosts.push({post_id:e.name.replace(/\.docx$/i,''),title:e.name.replace(/\.docx$/i,''),sections:[{type:'html',content:x.value}]});continue}if(n.endsWith('.pdf')){const x=await pdf(b);rawPosts.push({post_id:e.name.replace(/\.pdf$/i,''),title:x.text.split(/\r?\n/).find(Boolean)||e.name,sections:[{type:'paragraph',content:x.text}]})}}
-const posts=rawPosts.map(normalizePost),names=[...assetMap.keys()];const seen=new Set();for(const p of posts){if(p.post_id&&seen.has(p.post_id))p._duplicate=true;seen.add(p.post_id)}for(const p of posts){p.validation=validate(p,names);if(p._duplicate){p.validation.ok=false;p.validation.errors.push(`Duplicate post_id: ${p.post_id}`);delete p._duplicate}}
-return{protocolVersion:'9.0',posts,assets:[...assetMap.values()].map(a=>({name:a.name,mime:a.mime,size:a.buffer.length,dataBase64:a.buffer.toString('base64')})),summary:{posts:posts.length,assets:names.length,ready:posts.filter(p=>p.validation.ok).length,invalid:posts.filter(p=>!p.validation.ok).length}}}
+async function importEntries(entries){
+  const assetMap=new Map();
+  const jsonEntries=[];
+  const csvEntries=[];
+  const looseEntries=[];
+
+  for(const e of entries){
+    const n=e.name.toLowerCase(),b=e.buffer,base=e.name.split('/').pop();
+    if(/\.(png|jpe?g|webp)$/i.test(n)){
+      assetMap.set(base,{name:base,mime:mimeFor(n),buffer:b});
+      continue;
+    }
+    if(n.endsWith('.json')){jsonEntries.push(e);continue}
+    if(n.endsWith('.csv')){csvEntries.push(e);continue}
+    looseEntries.push(e);
+  }
+
+  let rawPosts=[];
+  let manifestSource='';
+
+  // A complete ZIP may intentionally contain BOTH aura-posts.json and aura-posts.csv.
+  // They are alternate representations of the same posts, so never import both.
+  // Prefer the canonical JSON manifest because it preserves nested sections/images safely.
+  const preferredJson=jsonEntries.find(e=>/(^|\/)aura-posts\.json$/i.test(e.name))
+    || jsonEntries.find(e=>/(^|\/)(posts|articles|manifest)\.json$/i.test(e.name));
+
+  const usableJson=[];
+  for(const e of jsonEntries){
+    try{
+      const j=JSON.parse(e.buffer.toString());
+      const candidates=Array.isArray(j)?j:(Array.isArray(j?.posts)?j.posts:[]);
+      // Ignore asset manifests, validation fixtures, metadata JSON, etc.
+      if(candidates.length && candidates.some(x=>x && typeof x==='object' && (x.post_id||x.title||x.sections))) usableJson.push({e,j,candidates});
+    }catch(err){
+      if(e===preferredJson) throw new Error(`Invalid JSON in ${e.name}: ${err.message}`);
+    }
+  }
+
+  let chosen=null;
+  if(preferredJson) chosen=usableJson.find(x=>x.e===preferredJson)||null;
+  if(!chosen) chosen=usableJson.find(x=>Array.isArray(x.j?.posts))||usableJson[0]||null;
+
+  if(chosen){
+    rawPosts=chosen.candidates;
+    manifestSource=chosen.e.name;
+  }else if(csvEntries.length){
+    const preferredCsv=csvEntries.find(e=>/(^|\/)aura-posts\.csv$/i.test(e.name))||csvEntries[0];
+    rawPosts=parseCSV(preferredCsv.buffer.toString()).map(row=>{
+      // CSV packages from the Aura prompt serialize the full section array here.
+      if(!row.sections && row.sections_json){
+        try{row.sections=JSON.parse(row.sections_json)}catch(err){row._sections_parse_error=`Invalid sections_json: ${err.message}`}
+      }
+      return row;
+    });
+    manifestSource=preferredCsv.name;
+  }else{
+    // Loose document import remains supported when no structured manifest exists.
+    for(const e of looseEntries){
+      const n=e.name.toLowerCase(),b=e.buffer;
+      if(n.endsWith('.md')||n.endsWith('.txt')||n.endsWith('.html')){const t=b.toString(),title=t.split(/\r?\n/).find(Boolean)?.replace(/^#+\s*/,'')||e.name;rawPosts.push({post_id:e.name.replace(/\..+$/,''),title,sections:[{type:n.endsWith('.html')?'html':'paragraph',content:t}],status:'draft'})}
+      else if(n.endsWith('.docx')){const x=await mammoth.convertToHtml({buffer:b});rawPosts.push({post_id:e.name.replace(/\.docx$/i,''),title:e.name.replace(/\.docx$/i,''),sections:[{type:'html',content:x.value}]})}
+      else if(n.endsWith('.pdf')){const x=await pdf(b);rawPosts.push({post_id:e.name.replace(/\.pdf$/i,''),title:x.text.split(/\r?\n/).find(Boolean)||e.name,sections:[{type:'paragraph',content:x.text}]})}
+    }
+    manifestSource=looseEntries.length?'loose documents':'';
+  }
+
+  const posts=rawPosts.map(raw=>{
+    const p=normalizePost(raw);
+    if(raw?._sections_parse_error) p._sections_parse_error=raw._sections_parse_error;
+    return p;
+  });
+  const names=[...assetMap.keys()];
+  const seen=new Set();
+  for(const p of posts){
+    p.validation=validate(p,names);
+    if(p._sections_parse_error){p.validation.ok=false;p.validation.errors.push(p._sections_parse_error);delete p._sections_parse_error}
+    if(p.post_id&&seen.has(p.post_id)){p.validation.ok=false;p.validation.errors.push(`Duplicate post_id inside selected manifest: ${p.post_id}`)}
+    if(p.post_id)seen.add(p.post_id);
+  }
+  return{
+    protocolVersion:'10.0',
+    manifestSource,
+    posts,
+    assets:[...assetMap.values()].map(a=>({name:a.name,mime:a.mime,size:a.buffer.length,dataBase64:a.buffer.toString('base64')})),
+    summary:{posts:posts.length,assets:names.length,ready:posts.filter(p=>p.validation.ok).length,invalid:posts.filter(p=>!p.validation.ok).length}
+  }
+}
 async function termId(w,type,name){const a=await wpFetch(w,`${type}?search=${encodeURIComponent(name)}&per_page=100`),hit=a.find(x=>x.name.toLowerCase()===name.toLowerCase());if(hit)return hit.id;return(await wpFetch(w,type,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})).id}
 async function uploadMedia(w,file,alt=''){const r=await wpFetch(w,'media',{method:'POST',headers:{'Content-Type':file.mimetype||'application/octet-stream','Content-Disposition':`attachment; filename="${file.originalname.replace(/"/g,'')}"`},body:file.buffer});if(alt)await wpFetch(w,`media/${r.id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({alt_text:alt})});return r}
 const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');function renderPost(p,media){return p.sections.map(s=>s.type==='heading'?`<h${s.level}>${esc(s.content)}</h${s.level}>`:s.type==='image'?(media[s.filename]?`<figure class="wp-block-image"><img src="${media[s.filename].source_url}" alt="${esc(s.alt_text)}">${s.caption?`<figcaption>${esc(s.caption)}</figcaption>`:''}</figure>`:`<!-- AURA:MISSING:${s.filename} -->`):s.type==='ad'?`<!-- AURA:AD:${esc(s.slot)} --><div class="aura-ad-slot" data-slot="${esc(s.slot)}"></div>`:s.type==='checklist'?`<ul>${s.items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:s.type==='html'?s.content:`<p>${esc(s.content)}</p>`).join('')}
-app.get('/',(q,r)=>r.type('html').send('<h1>Aura Publisher Pro API</h1><p>Online — V8 ZIP Pipeline</p>'));app.get('/healthz',(q,r)=>r.json({ok:true,status:'online',service:'Aura Publisher Pro API',version:'3.2.0'}));app.get('/health',(q,r)=>r.json({ok:true,status:'online',service:'Aura Publisher Pro API',version:'3.2.0'}));
+app.get('/',(q,r)=>r.type('html').send('<h1>Aura Publisher Pro API</h1><p>Online — V10 Manifest Pipeline</p>'));app.get('/healthz',(q,r)=>r.json({ok:true,status:'online',service:'Aura Publisher Pro API',version:'4.0.0'}));app.get('/health',(q,r)=>r.json({ok:true,status:'online',service:'Aura Publisher Pro API',version:'4.0.0'}));
 app.post('/api/wp/test',async(req,res)=>{try{const w=req.body.wordpress||{},d=await discoverWp(w),creds={...w,url:d.site,restRoot:d.root},me=await wpFetch(creds,'users/me?context=edit');res.json({ok:true,site:d.site,restRoot:d.root,user:{id:me.id,name:me.name,slug:me.slug,email:me.email||''},capabilities:me.capabilities||{}})}catch(e){const o=wpError(e);res.status(400).json(o)}});
 app.post('/api/import',upload.array('files',150),async(req,res)=>{try{const entries=[];for(const f of req.files||[]){if(f.originalname.toLowerCase().endsWith('.zip')){const z=new AdmZip(f.buffer);for(const e of z.getEntries())if(!e.isDirectory&&!e.entryName.startsWith('__MACOSX/'))entries.push({name:e.entryName,buffer:e.getData()})}else entries.push({name:f.originalname,buffer:f.buffer})}if(!entries.length)return res.status(400).json({error:'Choose at least one file or ZIP package.'});res.json(await importEntries(entries))}catch(e){res.status(400).json({error:`Import failed: ${e.message}`})}});
 app.post('/api/publish',upload.array('assets',150),async(req,res)=>{try{const w=JSON.parse(req.body.wordpress),p=normalizePost(JSON.parse(req.body.post)),files=Object.fromEntries((req.files||[]).map(f=>[f.originalname,f])),v=validate(p,Object.keys(files));if(!v.ok)return res.status(422).json({error:'Post is not publish-ready.',...v});const d=await discoverWp(w),creds={...w,url:d.site,restRoot:d.root},media={};for(const name of [...new Set([...v.requiredImages,v.featured].filter(Boolean))]){const f=files[name];if(!f)return res.status(422).json({error:`Required image missing from device asset store: ${name}`});const sec=p.sections.find(x=>x.filename===name),alt=sec?.alt_text||p.featured_image?.alt_text||'';media[name]=await uploadMedia(creds,f,alt)}const cats=[];for(const x of p.categories)cats.push(await termId(creds,'categories',x));const tags=[];for(const x of p.tags)tags.push(await termId(creds,'tags',x));const body={title:p.title,slug:p.slug,excerpt:p.excerpt,content:renderPost(p,media),status:p.status||'draft',categories:cats,tags,featured_media:v.featured&&media[v.featured]?.id||0};if(p.date)body.date=p.date;const out=await wpFetch(creds,'posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});res.json({ok:true,id:out.id,link:out.link,status:out.status,uploadedImages:Object.keys(media).length})}catch(e){const o=wpError(e);res.status(400).json(o)}});
-app.use((req,res)=>res.status(404).json({error:'Route not found',path:req.path}));app.use((e,q,r,n)=>r.status(400).json({error:e.message}));app.listen(PORT,'0.0.0.0',()=>console.log(`Aura V7 listening on ${PORT}`));
+app.use((req,res)=>res.status(404).json({error:'Route not found',path:req.path}));app.use((e,q,r,n)=>r.status(400).json({error:e.message}));app.listen(PORT,'0.0.0.0',()=>console.log(`Aura V10 listening on ${PORT}`));

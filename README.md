@@ -1,8 +1,5 @@
-# Aura Publisher Pro V9
+# Aura Publisher Pro V10
 
-V9 fixes stale V7/V8 frontend caching, removes all legacy queues during upgrade, uses a new IndexedDB asset store keyed by canonical lowercase filename, verifies every image after storage before accepting posts, adds an X remove button per post and Clear Queue, and keeps ZIP/JSON/CSV + WordPress publishing.
+V10 fixes structured ZIP imports. If a package contains both `aura-posts.json` and `aura-posts.csv`, Aura imports the JSON manifest only (they are alternate copies, not 2 batches). Asset-manifest/validation JSON files are ignored as post manifests. CSV-only packages parse `sections_json` into real sections. The queue has an × button per post and Clear All for the entire queue/assets.
 
-## Deploy
-Upload every file to the GitHub repo root. Render: `npm install`, `npm start`, health `/healthz`, `ALLOWED_ORIGINS=https://zayaiken21.github.io`. Clear build cache and deploy.
-
-The frontend intentionally loads `aura-v9.js`, a new filename, so Safari/GitHub Pages cannot keep executing an old cached V7/V8 app script. Test Engine should report API version 3.2.0.
+Deploy all files together. Render: `npm install`, `npm start`, health `/healthz`, `ALLOWED_ORIGINS=https://zayaiken21.github.io`. Test Engine should report API version 4.0.0.
