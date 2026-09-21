@@ -13,4 +13,14 @@ $('#importBtn').onclick=async()=>{const fd=new FormData();[...$('#files').files]
 const drop=$('#drop');drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag')};drop.ondragleave=()=>drop.classList.remove('drag');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');$('#files').files=e.dataTransfer.files};
 $('#exportBtn').onclick=()=>{save();const safe={...state,exportedAt:new Date().toISOString(),connections:{wordpressUrl:$('#wpUrl').value,wordpressUser:$('#wpUser').value}};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(safe,null,2)],{type:'application/json'}));a.download='aura-workspace.json';a.click()};
 $('#importWorkspace').onclick=async()=>{const f=$('#workspaceFile').files[0];if(!f)return;Object.assign(state,JSON.parse(await f.text()));render()};$('#profile').onchange=save;render();
-fetch(($('#api').value||'').replace(/\/$/,'')+'/health').then(r=>r.ok&&($('#health').textContent='API ONLINE')).catch(()=>{});
+async function wakeAura(){
+  const base=($('#api').value||'').replace(/\/$/,'');
+  if(!base){ $('#health').textContent='API URL NEEDED'; return; }
+  $('#health').textContent='WAKING ENGINE…';
+  for(let i=0;i<24;i++){
+    try{ const r=await fetch(base+'/healthz',{cache:'no-store'}); if(r.ok){ $('#health').textContent='API ONLINE'; return true; } }catch(e){}
+    await new Promise(resolve=>setTimeout(resolve,5000));
+  }
+  $('#health').textContent='API OFFLINE — RETRY'; return false;
+}
+wakeAura();

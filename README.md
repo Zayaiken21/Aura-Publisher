@@ -82,3 +82,23 @@ Aura renders ad markers as `<div class="aura-ad-slot" data-slot="article_ad_1"><
 
 ## Production notes
 The browser workspace is convenience storage, not enterprise identity/authentication. For a public multi-tenant SaaS, add server-side accounts, a database, encrypted per-user secrets, password reset/email verification, audit logs and object storage. The current design is strongest as a private/team self-hosted publisher with a protected backend.
+
+## Live deployment values for this project
+
+GitHub Pages frontend: `https://zayaiken21.github.io/Aura-Publisher/`
+
+Render backend/API: `https://aura-publisher.onrender.com`
+
+Render Build Command: `npm ci` after committing the included `package-lock.json` (or `npm install` if the lockfile is removed).
+
+Render Start Command: `npm start`
+
+Render Health Check Path: `/healthz`
+
+Render environment variable `ALLOWED_ORIGINS`: `https://zayaiken21.github.io`
+
+Create a long random `ADMIN_TOKEN` in Render. In Aura, the **Access token** field must contain that exact same value. It is the password between the public GitHub Pages frontend and your private Render API. It is not an OpenAI key and not a WordPress password.
+
+**Aura API URL** is simply the address of the Render backend: `https://aura-publisher.onrender.com`.
+
+WordPress Site URL is your WordPress site's root URL, e.g. `https://example.com`. Username is the dedicated WordPress publishing user's username. Application Password is generated in WordPress under Users → Profile → Application Passwords; do not use the normal WordPress login password.

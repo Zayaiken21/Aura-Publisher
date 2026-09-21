@@ -1,1 +1,1 @@
-window.AURA_CONFIG={API_BASE:"https://api.example.com"};
+window.AURA_CONFIG={API_BASE:"https://aura-publisher.onrender.com"};
