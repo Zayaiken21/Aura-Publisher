@@ -1,1 +1,240 @@
-<!doctype html><html><head><meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aura Publisher Pro</title><link rel="stylesheet" href="styles.css"></head><body><div class="cross">✝</div><div class="lightning l1">ϟ</div><div class="lightning l2">ϟ</div><main><header><div><b>⚡ AURA</b><span> Publisher Pro</span></div><div class="pill" id="health">API OFFLINE</div></header><section class="hero"><h1>WordPress Publishing Command Center</h1><p>Import → validate → match assets → preview → draft, schedule or publish.</p></section><nav><button data-tab="queue" class="active">Queue</button><button data-tab="import">Import</button><button data-tab="template">Template</button><button data-tab="settings">Connections</button></nav><section id="queue" class="tab active"><div class="stats"><article><strong id="total">0</strong><small>POSTS</small></article><article><strong id="ready">0</strong><small>READY</small></article><article><strong id="issues">0</strong><small>ISSUES</small></article></div><div class="queue-actions"><button id="deleteAll" class="danger">Clear All</button></div><div id="list" class="panel empty">No posts yet. Import an Aura ZIP package or JSON/CSV batch.</div></section><section id="import" class="tab"><div class="panel"><h2>Bulk Import</h2><div class="drop" id="drop">DROP FILES HERE<br><small>JSON • CSV • PDF • DOCX • MD • TXT • HTML • ZIP • JPG • PNG • WEBP</small><input id="files" type="file" multiple></div><button id="importBtn" class="primary">Analyze Package</button><p id="importState" class="muted">ZIP packages can contain aura-posts.json or CSV plus JPG, PNG and WEBP assets.</p></div></section><section id="template" class="tab"><div class="panel"><h2>Publishing Template</h2><textarea id="profile" rows="12"></textarea><p class="muted">Aura keeps ad and image slots deterministic. Use JSON sections with types: intro, heading, paragraph, image, ad, checklist, html.</p></div></section><section id="settings" class="tab"><div class="grid"><div class="panel"><h2>Aura Engine</h2><p><b>Render backend:</b><br><code>https://aura-publisher.onrender.com</code></p><input id="api" type="hidden"><button id="testApi">Test Engine</button><p class="muted">The Render backend is built in and connects automatically. No Aura access token is required in the browser.</p></div><div class="panel"><h2>WordPress</h2><label>Site URL<input id="wpUrl" placeholder="https://example.com"></label><label>WordPress Username / Email<input id="wpUser" autocomplete="username" placeholder="Your WordPress login username (email may work on some sites)"></label><label>Application Password<input id="wpPass" type="password" autocomplete="new-password" placeholder="WordPress Application Password"></label><button id="testWp">Connect / Test WordPress</button><button id="clearWp" type="button">Clear saved connection</button><p id="wpState" class="muted">Aura auto-discovers /wp-json/ or ?rest_route=/ and never treats a previous success as current after credentials change.</p></div><div class="panel"><h2>Workspace</h2><button id="exportBtn">Export safe JSON</button><input id="workspaceFile" type="file" accept="application/json"><button id="importWorkspace">Import workspace</button><p class="muted">Safe export intentionally excludes WordPress passwords.</p></div></div></section></main><dialog id="preview"><button onclick="this.closest('dialog').close()">Close</button><div id="previewBody"></div></dialog><script src="config.js?v=10.0.0"></script><script src="aura-v10.js?v=10.0.0"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<title>Aura Publisher Pro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=11.0.0">
+</head>
+<body>
+<div class="bg-cross" aria-hidden="true">✝</div><div class="bolt b1" aria-hidden="true">ϟ</div><div class="bolt b2" aria-hidden="true">ϟ</div>
+
+<!-- ============ LOCK SCREEN ============ -->
+<section id="lock" class="lock">
+  <div class="lock-card">
+    <div class="brand big"><span class="mark">⚡</span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="seg" role="tablist">
+      <button type="button" data-lock="unlock" class="on">Unlock</button>
+      <button type="button" data-lock="create">Create account</button>
+      <button type="button" data-lock="reset">Reset password</button>
+    </div>
+
+    <form id="fUnlock" class="lockform on" autocomplete="on">
+      <label>Username<input id="uUser" list="userList" autocomplete="username" required></label>
+      <datalist id="userList"></datalist>
+      <label>Password<span class="pw"><input id="uPass" type="password" autocomplete="current-password" required><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+      <button class="primary wide">Unlock</button>
+      <p class="msg" id="uMsg" role="status"></p>
+    </form>
+
+    <form id="fCreate" class="lockform">
+      <label>Username<input id="cUser" autocomplete="username" required minlength="3" maxlength="32"></label>
+      <label>Password<span class="pw"><input id="cPass" type="password" autocomplete="new-password" required><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+      <div class="meter" aria-hidden="true"><i id="cMeter"></i></div><p class="hint" id="cHint">12+ characters with 3 of: lowercase, uppercase, number, symbol.</p>
+      <label>Confirm password<input id="cPass2" type="password" autocomplete="new-password" required></label>
+      <fieldset>
+        <legend>WordPress account</legend>
+        <label>Site URL<input id="cUrl" placeholder="https://yoursite.com" required></label>
+        <label>WordPress username<input id="cWpUser" autocomplete="off" required></label>
+        <label>Application Password<span class="pw"><input id="cWpPass" type="password" autocomplete="off" required><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+        <p class="hint">Create one in WordPress under Users → Profile → Application Passwords. It is also your recovery key: it's the only way to reset your Aura password later.</p>
+      </fieldset>
+      <button class="primary wide">Verify and create account</button>
+      <p class="msg" id="cMsg" role="status"></p>
+    </form>
+
+    <form id="fReset" class="lockform">
+      <p class="hint">Prove it's you with the WordPress Application Password saved in this account, then choose a new Aura password. Without it the account can't be recovered.</p>
+      <label>Username<input id="rUser" list="userList" autocomplete="username" required></label>
+      <label>WordPress Application Password<input id="rApp" type="password" autocomplete="off" required></label>
+      <label>New password<span class="pw"><input id="rPass" type="password" autocomplete="new-password" required><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+      <div class="meter" aria-hidden="true"><i id="rMeter"></i></div><p class="hint" id="rHint"></p>
+      <label>Confirm new password<input id="rPass2" type="password" autocomplete="new-password" required></label>
+      <button class="primary wide">Reset password</button>
+      <button type="button" class="ghost danger wide" id="rDelete">I don't have it: delete this account and start over</button>
+      <p class="msg" id="rMsg" role="status"></p>
+    </form>
+
+    <p class="foot">Accounts are encrypted and stored on this device. <button type="button" class="link" id="restoreBtn">Restore a backup</button><input type="file" id="restoreFile" accept="application/json" hidden></p>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<div id="app" hidden>
+  <header class="top">
+    <div class="brand"><span class="mark">⚡</span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="lockBtn" class="ghost sm">Lock</button></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button data-tab="queue" class="on">Queue</button>
+    <button data-tab="import">Import</button>
+    <button data-tab="standard">Standard &amp; ads</button>
+    <button data-tab="prompt">ChatGPT prompt</button>
+    <button data-tab="settings">Connections</button>
+    <button data-tab="account">Account</button>
+  </nav>
+
+  <main>
+    <!-- QUEUE -->
+    <section id="queue" class="tab on">
+      <div class="stats">
+        <div><b id="sTotal">0</b><span>posts</span></div>
+        <div><b id="sReady">0</b><span>ready</span></div>
+        <div><b id="sPending">0</b><span>images to generate</span></div>
+        <div><b id="sLive">0</b><span>on WordPress</span></div>
+      </div>
+      <div class="toolbar">
+        <label class="inline">Publish as
+          <select id="bulkStatus">
+            <option value="publish">Publish now</option>
+            <option value="future">Schedule</option>
+            <option value="pending">Pending review</option>
+            <option value="draft">Draft</option>
+            <option value="private">Private</option>
+          </select>
+        </label>
+        <label class="inline" id="bulkDateWrap" hidden>First post <input type="datetime-local" id="bulkDate"></label>
+        <label class="inline" id="bulkGapWrap" hidden>Then every
+          <select id="bulkGap"><option value="0">same time</option><option value="1">1 day</option><option value="2">2 days</option><option value="3">3 days</option><option value="7">week</option></select>
+        </label>
+        <span class="grow"></span>
+        <button id="genAll">Generate missing images</button>
+        <button id="publishAll" class="primary">Publish all ready</button>
+        <button id="clearAll" class="ghost danger">Clear queue</button>
+      </div>
+      <div id="progress" class="progress" hidden><i></i><span></span></div>
+      <div id="list" class="list"></div>
+      <details class="log"><summary>Activity</summary><ol id="log"></ol></details>
+    </section>
+
+    <!-- IMPORT -->
+    <section id="import" class="tab">
+      <div class="panel">
+        <h2>Import a package</h2>
+        <p class="muted">Drop the ZIP ChatGPT made from the Aura prompt. Aura checks every post against the Mindful Adaption Standard, fills missing ad slots and alt text, and queues images to generate.</p>
+        <div class="drop" id="drop" tabindex="0">
+          <strong>Drop files here</strong><span>ZIP · JSON · CSV · DOCX · PDF · MD · TXT · HTML · JPG · PNG · WEBP</span>
+          <input id="files" type="file" multiple>
+        </div>
+        <label class="check"><input type="checkbox" id="replaceQueue"> Replace the current queue instead of adding to it</label>
+        <button id="importBtn" class="primary">Analyze package</button>
+        <p id="importState" class="muted" role="status"></p>
+      </div>
+    </section>
+
+    <!-- STANDARD & ADS -->
+    <section id="standard" class="tab">
+      <div class="panel">
+        <h2>Mindful Adaption Standard</h2>
+        <ol class="flow" aria-label="Required post structure">
+          <li>Featured image</li><li>Relatable introduction</li><li>Useful H2 sections</li><li class="img">Image</li><li class="ad">Ad</li><li>Practical examples</li><li class="img">Image</li><li class="ad">Ad</li><li>Action checklist</li><li>Closing takeaway</li>
+        </ol>
+        <p class="muted">Target about a 7-minute read (1,550–1,800 words).</p>
+        <div class="grid2">
+          <label class="check"><input type="checkbox" id="stEnforce"> Enforce the standard on import (add missing intro, image/ad slots, checklist and takeaway)</label>
+          <label class="check"><input type="checkbox" id="stAutoGen"> Generate missing images automatically before publishing</label>
+          <label>Image quality
+            <select id="stQuality"><option value="low">Low (fastest, cheapest)</option><option value="medium">Medium</option><option value="high">High</option></select>
+          </label>
+          <label>Alt text template <input id="stAlt"><small class="hint">Tokens: {subject} {caption} {section} {title} {keyword} {purpose}. Use {a|b} for "a, or b if empty".</small></label>
+        </div>
+        <label>Image style (added to every image prompt)<textarea id="stStyle" rows="3"></textarea></label>
+        <div class="row"><button id="saveStandard" class="primary">Save standard</button><button id="reapply">Re-apply to queue</button></div>
+      </div>
+
+      <div class="panel">
+        <div class="row between"><h2>Ad library</h2><button id="addAd">Add ad</button></div>
+        <p class="muted">Every post gets two ad slots. Slots without their own link are filled from this library, rotated per post. Paste HTML ad code (e.g. AdSense) to use it instead of a link card.</p>
+        <label>Ad label shown above link cards<input id="adLabel" placeholder="Sponsored"></label>
+        <div id="adList" class="adlist"></div>
+        <div class="row"><button id="saveAds" class="primary">Save ads</button></div>
+      </div>
+    </section>
+
+    <!-- PROMPT -->
+    <section id="prompt" class="tab">
+      <div class="panel">
+        <h2>ChatGPT package prompt</h2>
+        <p class="muted">Fill in the brief, copy the prompt into ChatGPT, then import the ZIP it gives you. Your ad links and the standard are built in.</p>
+        <div class="grid2">
+          <label>Site / brand<input id="pSite"></label>
+          <label>Number of posts<input id="pCount" type="number" min="1" max="20" value="5"></label>
+          <label>Niche<input id="pNiche" placeholder="e.g. mindful living and personal growth"></label>
+          <label>Audience<input id="pAudience" placeholder="e.g. busy parents in their 30s"></label>
+          <label>Voice<input id="pVoice" placeholder="e.g. warm, grounded, encouraging"></label>
+          <label>Topics (optional)<input id="pTopics" placeholder="Leave empty to let ChatGPT choose"></label>
+        </div>
+        <div class="row"><button id="copyPrompt" class="primary">Copy prompt</button><button id="dlPrompt">Download .md</button></div>
+        <textarea id="promptOut" rows="18" readonly spellcheck="false"></textarea>
+      </div>
+    </section>
+
+    <!-- CONNECTIONS -->
+    <section id="settings" class="tab">
+      <div class="grid2">
+        <div class="panel">
+          <h2>WordPress</h2>
+          <label>Site URL<input id="wpUrl" placeholder="https://yoursite.com"></label>
+          <label>WordPress username<input id="wpUser" autocomplete="off"></label>
+          <label>Application Password<span class="pw"><input id="wpPass" type="password" autocomplete="off"><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+          <p class="hint">Changing the Application Password here also updates your recovery key.</p>
+          <label>If the post already exists on WordPress
+            <select id="wpMode"><option value="upsert">Update it (no duplicates)</option><option value="new">Create a new post</option></select>
+          </label>
+          <div class="row"><button id="testWp">Test connection</button><button id="saveWp" class="primary">Save</button></div>
+          <p id="wpState" class="muted" role="status"></p>
+        </div>
+        <div class="panel">
+          <h2>Image generation</h2>
+          <p class="muted" id="genState">Checking the engine…</p>
+          <label>Your OpenAI API key (optional)<span class="pw"><input id="oaKey" type="password" autocomplete="off" placeholder="sk-…"><button type="button" class="eye" aria-label="Show key">Show</button></span></label>
+          <p class="hint">Only needed if the Render engine has no OPENAI_API_KEY. Stored encrypted in your account and sent only to your Aura engine.</p>
+          <div class="row"><button id="saveOa" class="primary">Save</button></div>
+          <h2 class="mt">Aura Engine</h2>
+          <p><code id="apiBase"></code></p>
+          <button id="testApi">Test engine</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACCOUNT -->
+    <section id="account" class="tab">
+      <div class="grid2">
+        <div class="panel">
+          <h2>Change password</h2>
+          <label>Current password<input id="aCur" type="password" autocomplete="current-password"></label>
+          <label>New password<input id="aNew" type="password" autocomplete="new-password"></label>
+          <div class="meter" aria-hidden="true"><i id="aMeter"></i></div><p class="hint" id="aHint"></p>
+          <label>Confirm new password<input id="aNew2" type="password" autocomplete="new-password"></label>
+          <button id="changePw" class="primary">Change password</button>
+          <p class="msg" id="aMsg" role="status"></p>
+        </div>
+        <div class="panel">
+          <h2>Backup and data</h2>
+          <p class="muted">The account backup stays encrypted. You need your password (or Application Password) to open it on another device.</p>
+          <div class="row wrap"><button id="exportAcct">Download account backup</button><button id="exportQueue">Export queue JSON</button></div>
+          <label class="inline">Auto-lock after
+            <select id="autoLock"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="240">4 hours</option></select>
+          </label>
+          <h2 class="mt danger-t">Delete account</h2>
+          <p class="muted">Removes this account, its queue and its stored images from this device. WordPress is not touched.</p>
+          <button id="deleteAcct" class="ghost danger">Delete this account</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="config.js?v=11.0.0"></script>
+<script src="aura-vault.js?v=11.0.0"></script>
+<script src="aura-prompt.js?v=11.0.0"></script>
+<script src="aura-app.js?v=11.0.0"></script>
+</body>
+</html>

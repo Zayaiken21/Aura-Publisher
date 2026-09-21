@@ -1,0 +1,503 @@
+// Aura Publisher Pro — client V11
+(() => {
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const API = (window.AURA_CONFIG?.API_BASE || 'https://aura-publisher.onrender.com').replace(/\/$/, '');
+  const V = window.AuraVault;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const lc = n => String(n || '').replace(/\\/g, '/').split('/').pop().trim().toLowerCase();
+  const hash = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+
+  const DEFAULTS = {
+    wp: { url: '', username: '', appPassword: '' }, openaiKey: '',
+    standard: { enforce: true, autoGenerate: true, quality: 'medium', altTemplate: '{subject|caption|section|title}, illustrating {keyword}',
+      style: 'Photorealistic editorial photography, natural window light, authentic diverse real people in everyday settings, shallow depth of field, warm hopeful mood, soft colour palette.' },
+    ads: [], adLabel: 'Sponsored',
+    publish: { status: 'publish', mode: 'upsert', gapDays: 0 },
+    prompt: { siteName: '', niche: '', audience: '', voice: '', topics: '', count: 5 },
+    autoLockMin: 30
+  };
+  const merge = (a, b) => { const o = structuredClone(a); for (const k in b || {}) o[k] = b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object' ? merge(a[k], b[k]) : b[k]; return o; };
+
+  let S = null;            // decrypted settings for the unlocked user
+  let uid = null;          // current user id
+  let ws = { posts: [], schemaVersion: 11 };
+  let health = { online: false, features: {} };
+  let busy = false;
+
+  // ---------- UI helpers ----------
+  function toast(msg, type = 'info', ms = 4200) { const t = document.createElement('div'); t.className = `toast ${type}`; t.textContent = msg; $('#toasts').append(t); setTimeout(() => t.remove(), ms); }
+  function log(msg, type = '') { const li = document.createElement('li'); li.className = type; li.textContent = `${new Date().toLocaleTimeString()} — ${msg}`; $('#log').prepend(li); while ($('#log').children.length > 200) $('#log').lastChild.remove(); }
+  function progress(done, total, label) { const p = $('#progress'); if (total == null) { p.hidden = true; return; } p.hidden = false; p.querySelector('i').style.width = `${Math.round(done / Math.max(1, total) * 100)}%`; p.querySelector('span').textContent = label; }
+  function meter(input, bar, hint, userSel) {
+    const f = () => { const st = V.strength(input.value, userSel ? $(userSel).value : (V.current()?.username || '')); bar.style.width = `${(st.score + (input.value ? 1 : 0)) * 20}%`; bar.dataset.s = st.ok ? 'ok' : st.score >= 2 ? 'mid' : 'low'; hint.textContent = input.value ? (st.ok ? 'Strong password.' : 'Needs ' + st.issues.join(', ') + '.') : '12+ characters with 3 of: lowercase, uppercase, number, symbol.'; };
+    input.addEventListener('input', f); f();
+  }
+  $$('.eye').forEach(b => b.onclick = () => { const i = b.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; b.textContent = i.type === 'password' ? 'Show' : 'Hide'; });
+
+  // ---------- API ----------
+  async function api(path, opt = {}, retries = 2) {
+    let r;
+    try { r = await fetch(API + path, { ...opt, mode: 'cors', cache: 'no-store' }); }
+    catch { throw new Error('Could not reach Aura Engine. It may be waking up; try again in 30 seconds.'); }
+    const t = await r.text(); let j; try { j = t ? JSON.parse(t) : {}; } catch { j = { error: t || 'Invalid server response' }; }
+    if (r.status === 429 && retries > 0) { const wait = (Number(r.headers.get('retry-after')) || 20) * 1000; log(`Rate limited, waiting ${Math.round(wait / 1000)} s…`, 'warn'); await sleep(Math.min(wait, 65000)); return api(path, opt, retries - 1); }
+    if (!r.ok) throw Object.assign(new Error(j.error || `Request failed (${r.status})`), { status: r.status, body: j });
+    return j;
+  }
+  const canGenerate = () => !!(health.features?.imageGeneration || S?.openaiKey);
+  const stdOptions = () => ({ enforce: S.standard.enforce, canGenerate: canGenerate(), altTemplate: S.standard.altTemplate });
+
+  // ---------- per-user image store (IndexedDB) ----------
+  const dbp = new Promise((res, rej) => { const q = indexedDB.open('aura-assets-v11', 1); q.onupgradeneeded = () => { const d = q.result; if (!d.objectStoreNames.contains('assets')) d.createObjectStore('assets', { keyPath: 'key' }); }; q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  const akey = n => `${uid}::${lc(n)}`;
+  const tx = async (mode, fn) => { const d = await dbp; return new Promise((res, rej) => { const t = d.transaction('assets', mode), st = t.objectStore('assets'); let out; const r = fn(st); if (r) r.onsuccess = () => { out = r.result; }; t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Storage aborted')); }); };
+  const assetPut = a => tx('readwrite', st => st.put({ key: akey(a.name), name: String(a.name).split('/').pop(), mime: a.mime, dataBase64: a.dataBase64, size: a.size || 0 }));
+  const assetGet = n => tx('readonly', st => st.get(akey(n))).then(x => x || null);
+  const assetDel = n => tx('readwrite', st => st.delete(akey(n)));
+  const assetKeys = () => tx('readonly', st => st.getAllKeys(IDBKeyRange.bound(`${uid}::`, `${uid}::\uffff`))).then(k => (k || []).map(x => x.split('::').slice(1).join('::')));
+  const assetClearUser = u => tx('readwrite', st => st.delete(IDBKeyRange.bound(`${u}::`, `${u}::\uffff`)));
+  const b64blob = a => { const bin = atob(a.dataBase64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: a.mime || 'image/jpeg' }); };
+
+  // ---------- workspace ----------
+  const wsKey = () => `aura-ws:${uid}`;
+  function loadWs() { try { ws = JSON.parse(localStorage.getItem(wsKey()) || '{"posts":[],"schemaVersion":11}'); } catch { ws = { posts: [], schemaVersion: 11 }; } if (ws.schemaVersion !== 11) ws = { posts: [], schemaVersion: 11 }; }
+  function saveWs() { try { localStorage.setItem(wsKey(), JSON.stringify(ws)); } catch (e) { toast('Browser storage is full. Remove published posts from the queue.', 'bad'); } }
+  const images = p => [...(p.featured_image?.filename ? [{ ...p.featured_image, featured: true }] : []), ...(p.sections || []).filter(s => s.type === 'image' && s.filename)];
+  async function refreshPending() {
+    const have = new Set((await assetKeys()).map(lc));
+    for (const p of ws.posts) {
+      const pend = images(p).filter(i => !have.has(lc(i.filename))).map(i => i.filename);
+      p.pending = pend;
+      const hard = (p.validation?.errors || []).filter(e => !/^Missing image:/.test(e));
+      const missingErr = canGenerate() ? [] : pend.map(f => `Missing image: ${f} (add it to the ZIP or turn on image generation)`);
+      p.validation = { ...(p.validation || {}), errors: [...hard, ...missingErr], ok: !hard.length && !missingErr.length };
+    }
+    saveWs();
+  }
+
+  // ---------- render queue ----------
+  const statusLabel = { publish: 'Published', future: 'Scheduled', draft: 'Draft', pending: 'Pending review', private: 'Private' };
+  function render() {
+    const ps = ws.posts;
+    $('#sTotal').textContent = ps.length;
+    $('#sReady').textContent = ps.filter(p => p.validation?.ok).length;
+    $('#sPending').textContent = ps.reduce((t, p) => t + (p.pending?.length || 0), 0);
+    $('#sLive').textContent = ps.filter(p => p.wp?.id).length;
+    if (!ps.length) { $('#list').innerHTML = `<div class="empty"><p>No posts in the queue.</p><button class="primary" data-go="prompt">Get the ChatGPT prompt</button> <button data-go="import">Import a package</button></div>`; return; }
+    $('#list').innerHTML = ps.map((p, i) => {
+      const st = p.standard?.stats || {}, v = p.validation || {};
+      const badges = [
+        v.ok ? `<span class="b ok">Ready</span>` : `<span class="b bad">Needs fixes</span>`,
+        p.pending?.length ? `<span class="b warn">${p.pending.length} image${p.pending.length > 1 ? 's' : ''} to generate</span>` : `<span class="b">Images ready</span>`,
+        p.wp?.id ? `<a class="b live" href="${esc(p.wp.link)}" target="_blank" rel="noopener">${esc(statusLabel[p.wp.status] || p.wp.status)} · #${p.wp.id}</a>` : ''
+      ].join('');
+      const meta = [st.words ? `${st.words.toLocaleString()} words · ${st.minutes} min read` : '', p.format_variant, `${st.images ?? images(p).length} images`, `${st.ads ?? 0} ads`].filter(Boolean).join(' · ');
+      const issues = [...(v.errors || []).map(e => `<li class="bad">${esc(e)}</li>`), ...(v.warnings || []).map(e => `<li class="warn">${esc(e)}</li>`), ...(p.standard?.notes || []).map(e => `<li>${esc(e)}</li>`)].join('');
+      const tgt = p.target?.status || '';
+      return `<article class="card" data-i="${i}">
+        <div class="card-main">
+          <h3>${esc(p.title || 'Untitled post')}</h3>
+          <p class="meta">${esc(meta)}</p>
+          <div class="badges">${badges}</div>
+          ${issues ? `<details class="issues"><summary>${(v.errors || []).length} errors · ${(v.warnings || []).length} warnings · ${(p.standard?.notes || []).length} auto-fixes</summary><ul>${issues}</ul></details>` : ''}
+        </div>
+        <div class="card-act">
+          <select data-act="status" aria-label="Publish status for this post">
+            <option value="" ${!tgt ? 'selected' : ''}>Use queue setting</option>
+            ${['publish', 'future', 'pending', 'draft', 'private'].map(s => `<option value="${s}" ${tgt === s ? 'selected' : ''}>${{ publish: 'Publish now', future: 'Schedule', pending: 'Pending review', draft: 'Draft', private: 'Private' }[s]}</option>`).join('')}
+          </select>
+          ${tgt === 'future' ? `<input type="datetime-local" data-act="date" value="${esc(p.target?.date || '')}" aria-label="Schedule date">` : ''}
+          <div class="btns">
+            <button data-act="preview">Preview</button>
+            ${p.pending?.length ? `<button data-act="gen" ${canGenerate() ? '' : 'disabled title="Image generation is not configured"'}>Generate images</button>` : ''}
+            <button class="primary" data-act="publish" ${v.ok ? '' : 'disabled'}>${p.wp?.id ? 'Update' : 'Publish'}</button>
+            <button class="ghost danger x" data-act="remove" aria-label="Remove ${esc(p.title)}">×</button>
+          </div>
+        </div>
+      </article>`;
+    }).join('');
+  }
+  $('#list').addEventListener('click', async e => {
+    const go = e.target.closest('[data-go]'); if (go) return switchTab(go.dataset.go);
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const i = Number(b.closest('.card').dataset.i), p = ws.posts[i]; if (!p) return;
+    if (b.dataset.act === 'preview') return preview(p);
+    if (b.dataset.act === 'remove') return removePost(i);
+    if (busy) return toast('Another job is running. Wait for it to finish.', 'warn');
+    busy = true; b.disabled = true;
+    try {
+      if (b.dataset.act === 'gen') await generateFor(p);
+      if (b.dataset.act === 'publish') { if (confirm(`${p.wp?.id ? 'Update' : 'Send'} "${p.title}" to WordPress as ${describe(targetFor(p, 0))}?`)) await publish(p, 0); }
+    } catch (err) { toast(err.message, 'bad', 8000); log(err.message, 'bad'); }
+    finally { busy = false; render(); }
+  });
+  $('#list').addEventListener('change', e => {
+    const el = e.target.closest('[data-act]'); if (!el) return;
+    const p = ws.posts[Number(el.closest('.card').dataset.i)];
+    p.target = p.target || {};
+    if (el.dataset.act === 'status') { p.target.status = el.value; if (el.value === 'future' && !p.target.date) p.target.date = defaultFuture(); }
+    if (el.dataset.act === 'date') p.target.date = el.value;
+    saveWs(); render();
+  });
+  async function removePost(i) {
+    const p = ws.posts[i]; if (!confirm(`Remove "${p.title}" from the queue? It stays on WordPress if already published.`)) return;
+    ws.posts.splice(i, 1);
+    const still = new Set(ws.posts.flatMap(x => images(x).map(m => lc(m.filename))));
+    for (const m of images(p)) if (!still.has(lc(m.filename))) await assetDel(m.filename).catch(() => {});
+    saveWs(); render();
+  }
+
+  // ---------- targets / scheduling ----------
+  const pad = n => String(n).padStart(2, '0');
+  const localIso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const defaultFuture = () => { const d = new Date(Date.now() + 86400000); d.setHours(9, 0, 0, 0); return localIso(d); };
+  function targetFor(p, n) {
+    if (p.target?.status) return { status: p.target.status, date: p.target.status === 'future' ? p.target.date : '' };
+    const status = $('#bulkStatus').value;
+    if (status !== 'future') return { status, date: '' };
+    const base = new Date($('#bulkDate').value || defaultFuture());
+    base.setDate(base.getDate() + n * Number($('#bulkGap').value || 0));
+    return { status, date: localIso(base) + ':00' };
+  }
+  const describe = t => t.status === 'future' ? `scheduled for ${new Date(t.date).toLocaleString()}` : ({ publish: 'a live post', pending: 'pending review', draft: 'a draft', private: 'a private post' }[t.status]);
+  $('#bulkStatus').onchange = () => { const f = $('#bulkStatus').value === 'future'; $('#bulkDateWrap').hidden = $('#bulkGapWrap').hidden = !f; if (f && !$('#bulkDate').value) $('#bulkDate').value = defaultFuture(); S.publish.status = $('#bulkStatus').value; V.save(S).catch(() => {}); };
+  $('#bulkGap').onchange = () => { S.publish.gapDays = Number($('#bulkGap').value); V.save(S).catch(() => {}); };
+
+  // ---------- image generation ----------
+  async function generateFor(p) {
+    if (!canGenerate()) throw new Error('Image generation is not configured. Add OPENAI_API_KEY on Render or your own key in Connections.');
+    await refreshPending();
+    const todo = images(p).filter(i => p.pending.includes(i.filename));
+    let n = 0;
+    for (const img of todo) {
+      progress(n, todo.length, `Generating ${img.filename} (${n + 1}/${todo.length})…`);
+      log(`Generating ${img.filename}`);
+      const j = await api('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.prompt || `${p.title}. ${img.alt_text}`, filename: img.filename, style: S.standard.style, quality: S.standard.quality, openaiKey: S.openaiKey || undefined }) }, 3);
+      await assetPut({ name: img.filename, mime: j.mime, dataBase64: j.dataBase64, size: j.dataBase64.length * 0.75 });
+      n++; log(`Created ${img.filename}`, 'ok');
+      await sleep(1200); // gentle pacing between image calls
+    }
+    progress(null);
+    await refreshPending();
+    if (todo.length) toast(`Generated ${todo.length} image${todo.length > 1 ? 's' : ''} for "${p.title}".`, 'ok');
+  }
+
+  // ---------- publishing ----------
+  async function publish(p, n) {
+    if (!S.wp.url || !S.wp.username || !S.wp.appPassword) { switchTab('settings'); throw new Error('Add your WordPress connection first.'); }
+    await refreshPending();
+    if (p.pending?.length) {
+      if (canGenerate() && S.standard.autoGenerate) await generateFor(p);
+      else throw new Error(`"${p.title}" has ${p.pending.length} image(s) missing. Generate them first.`);
+    }
+    if (!p.validation?.ok) throw new Error(`"${p.title}" is not ready: ${(p.validation?.errors || []).join('; ')}`);
+    const t = targetFor(p, n);
+    if (t.status === 'future' && (!t.date || new Date(t.date) <= new Date())) throw new Error('Pick a schedule time in the future.');
+    const fd = new FormData();
+    fd.append('wordpress', JSON.stringify(S.wp));
+    const { source, validation, pending, wp, target, standard, ...post } = p;
+    fd.append('post', JSON.stringify(post));
+    fd.append('options', JSON.stringify({ status: t.status, date: t.date, mode: S.publish.mode, ads: S.ads, adLabel: S.adLabel, existingMedia: wp?.media || {}, wpPostId: wp?.id || null }));
+    const reuse = new Set(Object.keys(wp?.media || {}).map(lc));
+    for (const img of images(p)) {
+      if (reuse.has(lc(img.filename))) continue;
+      const a = await assetGet(img.filename);
+      if (!a) throw new Error(`Image ${img.filename} is not stored on this device.`);
+      fd.append('assets', b64blob(a), img.filename);
+    }
+    progress(0, 1, `Sending "${p.title}" to WordPress…`);
+    log(`Publishing "${p.title}" as ${t.status}`);
+    let j;
+    try { j = await api('/api/publish', { method: 'POST', body: fd }); }
+    catch (e) {
+      // Media IDs from an earlier publish may have been deleted in WordPress; retry once with fresh uploads.
+      if (e.status === 422 && wp?.media && /missing from this device/.test(e.message)) { p.wp = { ...wp, media: {} }; progress(null); return publish(p, n); }
+      progress(null); throw e;
+    }
+    progress(null);
+    p.wp = { id: j.id, link: j.link, status: j.status, media: { ...(wp?.media || {}), ...(j.media || {}) }, at: Date.now() };
+    saveWs();
+    const msg = `${j.updated ? 'Updated' : 'Created'} "${p.title}" — ${statusLabel[j.status] || j.status} (#${j.id}, ${j.uploadedImages} image${j.uploadedImages === 1 ? '' : 's'} uploaded)`;
+    log(msg, 'ok'); toast(msg, 'ok');
+    return j;
+  }
+  $('#publishAll').onclick = async () => {
+    if (busy) return;
+    const list = ws.posts.filter(p => p.validation?.ok);
+    if (!list.length) return toast('No posts are ready to publish.', 'warn');
+    const t0 = targetFor({}, 0);
+    if (!confirm(`Send ${list.length} post${list.length > 1 ? 's' : ''} to WordPress as ${describe(t0)}${t0.status === 'future' && Number($('#bulkGap').value) ? `, then every ${$('#bulkGap').selectedOptions[0].text}` : ''}?`)) return;
+    busy = true; let ok = 0, fail = 0;
+    for (let k = 0; k < list.length; k++) {
+      progress(k, list.length, `Post ${k + 1} of ${list.length}`);
+      try { await publish(list[k], k); ok++; }
+      catch (e) { fail++; log(`${list[k].title}: ${e.message}`, 'bad'); if (e.status === 401 || /authentication|not allowed to publish|can only save drafts/i.test(e.message)) { toast(e.message, 'bad', 9000); break; } }
+      render();
+      if (k < list.length - 1) await sleep(2000); // pace WordPress + engine requests
+    }
+    busy = false; progress(null); render();
+    toast(`Done: ${ok} sent${fail ? `, ${fail} failed (see Activity)` : ''}.`, fail ? 'warn' : 'ok', 7000);
+  };
+  $('#genAll').onclick = async () => {
+    if (busy) return; busy = true;
+    try { await refreshPending(); const list = ws.posts.filter(p => p.pending?.length); if (!list.length) toast('All images are ready.', 'ok'); for (const p of list) { await generateFor(p); render(); } }
+    catch (e) { toast(e.message, 'bad', 8000); log(e.message, 'bad'); }
+    finally { busy = false; progress(null); render(); }
+  };
+  $('#clearAll').onclick = async () => { if (!ws.posts.length || !confirm('Remove every post and stored image from this queue? WordPress is not touched.')) return; ws.posts = []; await assetClearUser(uid); saveWs(); render(); toast('Queue cleared.'); };
+
+  // ---------- preview ----------
+  const urls = [];
+  function inline(s) { let t = esc(s); t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>'); return t; }
+  function resolveAd(sec, idx, p) {
+    const lib = (S.ads || []).filter(a => a && a.enabled !== false && (a.url || a.html));
+    const fromLib = lib.find(a => a.slot && a.slot === sec.slot) || (lib.length ? lib[(hash(p.slug || p.title) + idx) % lib.length] : null);
+    if (sec.html) return { html: sec.html };
+    if (sec.url) return { ...(fromLib || {}), ...Object.fromEntries(Object.entries(sec).filter(([, v]) => v)), html: '' };
+    return fromLib;
+  }
+  async function imgTag(img, cls = '') {
+    const a = await assetGet(img.filename);
+    if (!a) return `<figure class="ph ${cls}"><div><b>Image will be generated</b><small>${esc(img.prompt || '')}</small></div><figcaption>Alt: ${esc(img.alt_text)}</figcaption></figure>`;
+    const u = URL.createObjectURL(b64blob(a)); urls.push(u);
+    return `<figure class="${cls}"><img src="${u}" alt="${esc(img.alt_text)}">${img.caption ? `<figcaption>${esc(img.caption)}</figcaption>` : ''}<small class="alt">Alt: ${esc(img.alt_text)}</small></figure>`;
+  }
+  async function preview(p) {
+    urls.splice(0).forEach(u => URL.revokeObjectURL(u));
+    let adI = 0, out = `<h1>${esc(p.title)}</h1>`;
+    if (p.featured_image) out += await imgTag(p.featured_image, 'hero');
+    for (let i = 0; i < p.sections.length; i++) {
+      const s = p.sections[i], prev = p.sections[i - 1];
+      if (s.type === 'heading') out += `<h${s.level}>${inline(s.content)}</h${s.level}>`;
+      else if (s.type === 'intro') out += `<p class="lead">${inline(s.content)}</p>`;
+      else if (s.type === 'image') out += await imgTag(s);
+      else if (s.type === 'ad') {
+        const ad = resolveAd(s, adI++, p);
+        out += !ad ? `<aside class="adcard empty-ad">${esc(S.adLabel)} · ${esc(s.slot)} — empty (add an ad in Standard &amp; ads)</aside>` : ad.html ? `<aside class="adcard"><small>${esc(S.adLabel)} · HTML ad code</small><code>${esc(ad.html.slice(0, 140))}…</code></aside>` : `<aside class="adcard"><small>${esc(S.adLabel)}</small><b>${esc(ad.label || 'Recommended resource')}</b>${ad.text ? `<p>${esc(ad.text)}</p>` : ''}<a href="${esc(ad.url)}" target="_blank" rel="noopener sponsored">${esc(ad.cta || 'Learn more')}</a></aside>`;
+      }
+      else if (s.type === 'list') out += `<${s.ordered ? 'ol' : 'ul'}>${s.items.map(x => `<li>${inline(x)}</li>`).join('')}</${s.ordered ? 'ol' : 'ul'}>`;
+      else if (s.type === 'checklist') out += `${s.title && prev?.type !== 'heading' ? `<h2>${esc(s.title)}</h2>` : ''}<ul class="checklist">${s.items.map(x => `<li>${inline(x)}</li>`).join('')}</ul>`;
+      else if (s.type === 'callout') out += `<aside class="callout">${s.label ? `<b>${esc(s.label)}</b>` : ''}<p>${inline(s.content)}</p></aside>`;
+      else if (s.type === 'html') out += `<div class="rawhtml">${s.content}</div>`;
+      else out += `<p>${inline(s.content)}</p>`;
+    }
+    const st = p.standard?.stats || {};
+    $('#previewMeta').textContent = `${st.words || 0} words · ${st.minutes || 0} min read · ${st.h2 || 0} H2 · ${st.images || 0} images · ${st.ads || 0} ads`;
+    $('#previewBody').innerHTML = out;
+    $('#preview').showModal();
+  }
+  $('#closePreview').onclick = () => $('#preview').close();
+
+  // ---------- import ----------
+  async function importFiles(files) {
+    if (!files?.length) return toast('Choose a ZIP, JSON, CSV or document first.', 'warn');
+    const fd = new FormData(); [...files].forEach(f => fd.append('files', f));
+    const replace = $('#replaceQueue').checked;
+    const existing = replace ? [] : await assetKeys();
+    fd.append('options', JSON.stringify({ ...stdOptions(), existingAssets: existing }));
+    $('#importState').textContent = 'Analyzing package…';
+    try {
+      const j = await api('/api/import', { method: 'POST', body: fd });
+      if (!Array.isArray(j.posts)) throw new Error('Unexpected response. Deploy the V11 server (API 5.0.0) and reload this page.');
+      if (replace) { await assetClearUser(uid); ws.posts = []; }
+      for (const a of j.assets || []) await assetPut(a);
+      const byId = new Map(ws.posts.map((p, i) => [p.post_id, i]));
+      for (const p of j.posts) { const at = byId.get(p.post_id); if (at != null) { p.wp = ws.posts[at].wp; p.target = ws.posts[at].target; ws.posts[at] = p; } else ws.posts.push(p); }
+      await refreshPending(); render();
+      const pend = ws.posts.reduce((t, p) => t + (p.pending?.length || 0), 0);
+      const fixes = j.posts.reduce((t, p) => t + (p.standard?.notes?.length || 0), 0);
+      $('#importState').textContent = `Imported ${j.posts.length} posts and ${j.assets.length} images from ${j.manifestSource || 'files'} · ${j.summary.ready} ready · ${fixes} auto-fixes · ${pend} images to generate.`;
+      log($('#importState').textContent, 'ok');
+      switchTab('queue');
+    } catch (e) { $('#importState').textContent = `Import failed: ${e.message}`; toast(e.message, 'bad', 8000); }
+  }
+  $('#importBtn').onclick = () => importFiles($('#files').files);
+  const drop = $('#drop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
+  drop.ondragleave = () => drop.classList.remove('drag');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('drag'); importFiles(e.dataTransfer.files); };
+
+  // ---------- standard & ads ----------
+  function fillStandard() {
+    $('#stEnforce').checked = S.standard.enforce; $('#stAutoGen').checked = S.standard.autoGenerate; $('#stQuality').value = S.standard.quality;
+    $('#stAlt').value = S.standard.altTemplate; $('#stStyle').value = S.standard.style; $('#adLabel').value = S.adLabel; renderAds();
+  }
+  function renderAds() {
+    $('#adList').innerHTML = S.ads.length ? S.ads.map((a, i) => `<div class="ad-row" data-i="${i}">
+      <div class="grid2">
+        <label>Name<input data-k="name" value="${esc(a.name)}" placeholder="e.g. Journal affiliate"></label>
+        <label>Link URL<input data-k="url" value="${esc(a.url)}" placeholder="https://…"></label>
+        <label>Headline<input data-k="label" value="${esc(a.label)}" placeholder="The 5-minute gratitude journal"></label>
+        <label>Button text<input data-k="cta" value="${esc(a.cta)}" placeholder="See the journal"></label>
+        <label>One-line description<input data-k="text" value="${esc(a.text)}"></label>
+        <label>Image URL (optional)<input data-k="image" value="${esc(a.image)}"></label>
+      </div>
+      <label>HTML ad code (optional, replaces the link card)<textarea data-k="html" rows="2">${esc(a.html)}</textarea></label>
+      <div class="row between"><label class="check"><input type="checkbox" data-k="enabled" ${a.enabled !== false ? 'checked' : ''}> Active</label><button class="ghost danger sm" data-del="${i}">Remove</button></div>
+    </div>`).join('') : `<p class="muted">No ads yet. Empty slots publish as an ad placeholder your ad plugin can fill.</p>`;
+  }
+  function readAds() { return $$('.ad-row').map(r => { const o = {}; r.querySelectorAll('[data-k]').forEach(el => o[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim()); return o; }); }
+  $('#addAd').onclick = () => { S.ads = readAds(); S.ads.push({ name: '', url: '', label: '', cta: 'Learn more', text: '', image: '', html: '', enabled: true }); renderAds(); };
+  $('#adList').onclick = e => { const d = e.target.closest('[data-del]'); if (!d) return; S.ads = readAds(); S.ads.splice(Number(d.dataset.del), 1); renderAds(); };
+  $('#saveAds').onclick = async () => {
+    const ads = readAds(); const bad = ads.find(a => a.url && !/^https?:\/\//i.test(a.url));
+    if (bad) return toast(`Ad link must start with https:// (${bad.url})`, 'bad');
+    S.ads = ads; S.adLabel = $('#adLabel').value.trim() || 'Sponsored'; await V.save(S); buildPrompt(); toast('Ads saved. They fill every empty ad slot.', 'ok');
+  };
+  $('#saveStandard').onclick = async () => {
+    Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
+    await V.save(S); toast('Standard saved.', 'ok');
+  };
+  $('#reapply').onclick = async () => {
+    if (!ws.posts.length) return toast('The queue is empty.', 'warn');
+    try {
+      const j = await api('/api/standardize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ posts: ws.posts.map(({ validation, pending, ...p }) => p), options: stdOptions(), assetNames: await assetKeys() }) });
+      ws.posts = j.posts; await refreshPending(); render(); toast('Standard re-applied to the queue.', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  // ---------- prompt ----------
+  const pFields = { pSite: 'siteName', pCount: 'count', pNiche: 'niche', pAudience: 'audience', pVoice: 'voice', pTopics: 'topics' };
+  function buildPrompt() { $('#promptOut').value = window.AuraPrompt.build({ ...S.prompt, ads: S.ads }); }
+  Object.entries(pFields).forEach(([id, k]) => $('#' + id).addEventListener('input', () => { S.prompt[k] = id === 'pCount' ? Number($('#' + id).value) : $('#' + id).value; buildPrompt(); clearTimeout(buildPrompt.t); buildPrompt.t = setTimeout(() => V.save(S).catch(() => {}), 800); }));
+  $('#copyPrompt').onclick = async () => { try { await navigator.clipboard.writeText($('#promptOut').value); toast('Prompt copied. Paste it into ChatGPT.', 'ok'); } catch { $('#promptOut').select(); document.execCommand('copy'); toast('Prompt copied.', 'ok'); } };
+  $('#dlPrompt').onclick = () => download('aura-chatgpt-prompt.md', $('#promptOut').value, 'text/markdown');
+  function download(name, text, type = 'application/json') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+
+  // ---------- connections ----------
+  function fillConnections() { $('#wpUrl').value = S.wp.url; $('#wpUser').value = S.wp.username; $('#wpPass').value = S.wp.appPassword; $('#wpMode').value = S.publish.mode; $('#oaKey').value = S.openaiKey || ''; $('#apiBase').textContent = API; }
+  const wpForm = () => ({ url: $('#wpUrl').value.trim(), username: $('#wpUser').value.trim(), appPassword: $('#wpPass').value.trim() });
+  async function testWp(w) {
+    const j = await api('/api/wp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wordpress: w }) });
+    return j;
+  }
+  $('#testWp').onclick = async () => {
+    $('#wpState').textContent = 'Testing…'; $('#wpState').className = 'muted';
+    try { const j = await testWp(wpForm()); $('#wpState').innerHTML = `Connected as <b>${esc(j.user?.name)}</b> (${esc((j.user?.roles || []).join(', ') || 'user')}). ${j.canPublish ? 'Can publish live posts.' : '<span class="bad">This role can only save drafts. Use an Author, Editor or Administrator to publish.</span>'}`; $('#wpState').className = 'ok'; }
+    catch (e) { $('#wpState').textContent = e.message; $('#wpState').className = 'bad'; }
+  };
+  $('#saveWp').onclick = async () => {
+    const w = wpForm();
+    if (!w.url || !w.username || w.appPassword.replace(/\s/g, '').length < 16) return toast('Fill in all three WordPress fields.', 'warn');
+    S.wp = w; S.publish.mode = $('#wpMode').value; await V.save(S); toast('WordPress connection saved to your account.', 'ok');
+  };
+  $('#saveOa').onclick = async () => { S.openaiKey = $('#oaKey').value.trim(); await V.save(S); await refreshPending(); render(); genState(); toast('Saved.', 'ok'); };
+  function genState() { $('#genState').textContent = health.features?.imageGeneration ? `The engine generates images with ${health.features.imageModel}. No key needed here.` : S?.openaiKey ? 'Using your OpenAI key for image generation.' : health.online ? 'The engine has no OpenAI key. Add yours below, or set OPENAI_API_KEY on Render.' : 'Engine offline.'; }
+  $('#testApi').onclick = async () => { try { const j = await api('/healthz'); toast(`${j.service} ${j.version} online`, 'ok'); } catch (e) { toast(e.message, 'bad'); } };
+
+  // ---------- account ----------
+  meter($('#aNew'), $('#aMeter'), $('#aHint'));
+  $('#changePw').onclick = async () => {
+    const m = $('#aMsg');
+    if ($('#aNew').value !== $('#aNew2').value) { m.textContent = 'New passwords do not match.'; m.className = 'msg bad'; return; }
+    try { await V.changePassword($('#aCur').value, $('#aNew').value); m.textContent = 'Password changed.'; m.className = 'msg ok'; $('#aCur').value = $('#aNew').value = $('#aNew2').value = ''; }
+    catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  };
+  $('#exportAcct').onclick = () => download(`aura-account-${uid}.json`, JSON.stringify(V.exportRecord(), null, 2));
+  $('#exportQueue').onclick = () => download(`aura-queue-${uid}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), posts: ws.posts.map(({ source, ...p }) => p) }, null, 2));
+  $('#autoLock').onchange = async () => { S.autoLockMin = Number($('#autoLock').value); await V.save(S); };
+  $('#deleteAcct').onclick = async () => {
+    const name = V.current()?.username;
+    if (prompt(`Type "${name}" to delete this account from this device.`) !== name) return;
+    const u = uid; await assetClearUser(u).catch(() => {}); V.remove(name); lockUi(); toast('Account deleted.');
+  };
+
+  // ---------- tabs ----------
+  function switchTab(id) { $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === id)); $$('.tab').forEach(t => t.classList.toggle('on', t.id === id)); window.scrollTo({ top: 0 }); }
+  $$('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+  // ---------- lock screen ----------
+  function lockTab(id) { $$('[data-lock]').forEach(b => b.classList.toggle('on', b.dataset.lock === id)); $$('.lockform').forEach(f => f.classList.toggle('on', f.id === 'f' + id[0].toUpperCase() + id.slice(1))); }
+  $$('[data-lock]').forEach(b => b.onclick = () => lockTab(b.dataset.lock));
+  function refreshUsers() { const us = V.list(); $('#userList').innerHTML = us.map(u => `<option value="${esc(u.username)}">`).join(''); if (us.length === 1 && !$('#uUser').value) $('#uUser').value = us[0].username; if (!us.length) lockTab('create'); }
+  meter($('#cPass'), $('#cMeter'), $('#cHint'), '#cUser');
+  meter($('#rPass'), $('#rMeter'), $('#rHint'), '#rUser');
+  const setMsg = (el, t, cls = 'bad') => { el.textContent = t; el.className = `msg ${cls}`; };
+
+  $('#fUnlock').onsubmit = async e => {
+    e.preventDefault(); const m = $('#uMsg'); setMsg(m, 'Unlocking…', 'muted');
+    try { await V.unlock($('#uUser').value, $('#uPass').value); $('#uPass').value = ''; setMsg(m, ''); enterApp(); }
+    catch (err) { setMsg(m, err.message); }
+  };
+  $('#fCreate').onsubmit = async e => {
+    e.preventDefault(); const m = $('#cMsg');
+    if ($('#cPass').value !== $('#cPass2').value) return setMsg(m, 'Passwords do not match.');
+    const st = V.strength($('#cPass').value, $('#cUser').value); if (!st.ok) return setMsg(m, 'Password needs ' + st.issues.join(', ') + '.');
+    if (V.exists($('#cUser').value)) return setMsg(m, 'That username already exists on this device.');
+    const w = { url: $('#cUrl').value.trim(), username: $('#cWpUser').value.trim(), appPassword: $('#cWpPass').value.trim() };
+    setMsg(m, 'Checking your WordPress login…', 'muted');
+    try { const j = await testWp(w); w.url = j.site || w.url; setMsg(m, `WordPress verified as ${j.user?.name}. Encrypting your account…`, 'ok'); }
+    catch (err) {
+      if (err.status) return setMsg(m, err.message); // WordPress said no: the recovery key must be correct
+      if (!confirm('Aura Engine is not reachable right now, so your WordPress login could not be verified. Create the account anyway? (Your Application Password becomes your recovery key, so make sure it is correct.)')) return setMsg(m, 'Not created. Try again when the engine is online.');
+    }
+    try {
+      const settings = merge(DEFAULTS, { wp: w });
+      await V.create($('#cUser').value, $('#cPass').value, settings);
+      $('#cPass').value = $('#cPass2').value = $('#cWpPass').value = ''; setMsg(m, '');
+      enterApp(); toast('Account created. Your WordPress login is saved and encrypted.', 'ok');
+    } catch (err) { setMsg(m, err.message); }
+  };
+  $('#fReset').onsubmit = async e => {
+    e.preventDefault(); const m = $('#rMsg');
+    if ($('#rPass').value !== $('#rPass2').value) return setMsg(m, 'New passwords do not match.');
+    setMsg(m, 'Verifying…', 'muted');
+    try { await V.recover($('#rUser').value, $('#rApp').value, $('#rPass').value); $('#rApp').value = $('#rPass').value = $('#rPass2').value = ''; setMsg(m, ''); enterApp(); toast('Password reset. You are signed in.', 'ok'); }
+    catch (err) { setMsg(m, err.message); }
+  };
+  $('#rDelete').onclick = async () => {
+    const name = $('#rUser').value.trim();
+    if (!name || !V.exists(name)) return setMsg($('#rMsg'), 'Enter the username of the account to delete.');
+    if (prompt(`This permanently deletes "${name}", its queue and images on this device. Type the username to confirm.`) !== name) return;
+    await assetClearUser(name.toLowerCase()).catch(() => {}); V.remove(name); refreshUsers(); lockTab('create'); toast('Account deleted. Create a new one.');
+  };
+  $('#restoreBtn').onclick = () => $('#restoreFile').click();
+  $('#restoreFile').onchange = async () => {
+    const f = $('#restoreFile').files[0]; if (!f) return;
+    try { let obj = JSON.parse(await f.text()), name; try { name = V.importRecord(obj); } catch (e) { if (/already exists/.test(e.message) && confirm(e.message + ' Replace it with the backup?')) name = V.importRecord(obj, true); else throw e; } refreshUsers(); $('#uUser').value = name; lockTab('unlock'); toast(`Restored "${name}". Unlock with its password.`, 'ok'); }
+    catch (e) { toast(e.message, 'bad'); } finally { $('#restoreFile').value = ''; }
+  };
+
+  // ---------- session lifecycle ----------
+  let idleTimer;
+  function bumpIdle() { clearTimeout(idleTimer); if (!S) return; idleTimer = setTimeout(() => { lockUi(); toast('Locked after inactivity.'); }, (S.autoLockMin || 30) * 60000); }
+  ['click', 'keydown', 'pointermove', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (S) { clearTimeout(bumpIdle.t); bumpIdle.t = setTimeout(bumpIdle, 1000); } }, { passive: true }));
+
+  async function enterApp() {
+    S = merge(DEFAULTS, V.settings()); uid = V.current().uid;
+    $('#who').textContent = V.current().username;
+    $('#lock').hidden = true; $('#app').hidden = false;
+    loadWs(); fillStandard(); fillConnections();
+    Object.entries(pFields).forEach(([id, k]) => $('#' + id).value = S.prompt[k] ?? '');
+    buildPrompt();
+    $('#bulkStatus').value = S.publish.status; $('#bulkGap').value = String(S.publish.gapDays || 0); $('#bulkStatus').onchange();
+    $('#autoLock').value = String(S.autoLockMin || 30);
+    await refreshPending().catch(() => {}); render(); genState(); bumpIdle();
+    switchTab('queue');
+  }
+  function lockUi() {
+    V.lock(); S = null; uid = null; ws = { posts: [], schemaVersion: 11 };
+    clearTimeout(idleTimer); $('#app').hidden = true; $('#lock').hidden = false;
+    $('#list').innerHTML = ''; $('#log').innerHTML = ''; ['#wpPass', '#oaKey', '#aCur', '#aNew', '#aNew2'].forEach(s => $(s).value = '');
+    if ($('#preview').open) $('#preview').close();
+    refreshUsers(); lockTab(V.list().length ? 'unlock' : 'create');
+  }
+  $('#lockBtn').onclick = lockUi;
+
+  // ---------- engine health ----------
+  async function wake() {
+    $('#health').textContent = 'Waking engine…'; $('#health').className = 'pill';
+    for (let i = 0; i < 24; i++) {
+      try { const r = await fetch(API + '/healthz', { cache: 'no-store' }); if (r.ok) { health = { online: true, ...(await r.json()) }; $('#health').textContent = `Engine online · API ${health.version}`; $('#health').className = 'pill on'; if (S) { genState(); await refreshPending().catch(() => {}); render(); } return; } } catch {}
+      await sleep(5000);
+    }
+    $('#health').textContent = 'Engine offline'; $('#health').className = 'pill off';
+  }
+  $('#health').onclick = wake;
+
+  // Prefill create form from the old V10 connection, if present.
+  $('#cUrl').value = localStorage.getItem('wp-url') || ''; $('#cWpUser').value = localStorage.getItem('wp-user') || '';
+  if (!window.crypto?.subtle) { $('#uMsg').textContent = 'This browser cannot encrypt accounts. Open Aura over https in a current browser.'; }
+  refreshUsers(); wake();
+})();
