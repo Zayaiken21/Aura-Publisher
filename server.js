@@ -1,4 +1,4 @@
-// Aura Publisher Pro — API 5.0.0 (V11)
+// Aura Publisher Pro — API 6.0.0 (V13)
 // Mindful Adaption Standard enforcement, real publishing (publish / schedule / pending / draft),
 // idempotent upserts, ad-slot filling, alt-text templating, AI image generation, WP retry/backoff.
 import express from 'express';
@@ -8,8 +8,8 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '5.3.0';
-const PROTOCOL = '12.0';
+const API_VERSION = '6.0.0';
+const PROTOCOL = 'aura-13';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -1089,7 +1089,7 @@ async function uploadMedia(w, file, meta) {
 
 // ---------- routes ----------
 const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
-app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V11 (API ${API_VERSION})</p>`));
+app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V13 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
 
@@ -1264,4 +1264,4 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req
 app.use((e, q, r, n) => r.status(e.status === 413 || e.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: e.message }));
 
 export { normalizePost, applyStandard, validate, renderPost, planAds, artDirect };
-if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V11 (API ${API_VERSION}) listening on ${PORT}`));
+if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V13 (API ${API_VERSION}) listening on ${PORT}`));

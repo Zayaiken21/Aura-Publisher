@@ -1,31 +1,34 @@
-# Aura Publisher Pro V12
+# Aura Publisher Pro V13
 
-WordPress auto-publisher fed by ONE ChatGPT ZIP per batch.
+V13 is the large-batch publishing build.
 
-## Files
-- **GitHub Pages (website):** `index.html`, `styles.css`, `aura-app.js`, `aura-vault.js`, `aura-prompt.js`, `config.js` (keep your existing one)
-- **Render (engine):** `server.js`, `package.json` (`mcp-server.js` optional, unchanged)
-- `.env.example` lists the Render settings
+## What changed
+- Queue metadata moved from `localStorage` to IndexedDB, removing the small localStorage quota that caused **“Browser storage is full”** on large article runs.
+- Existing V11/V12 local queues migrate automatically the first time the user signs in.
+- Images remain in IndexedDB only until WordPress confirms its media IDs. Aura then releases the local image blobs automatically while keeping the WordPress media map, so published batches do not continuously consume browser storage.
+- Published WordPress media counts as available during later validation, so automatic cleanup does not make a published post look broken.
+- `Clear all` removes queue metadata and local photo cache without touching WordPress.
+- The prompt planner supports up to 1,000 planned posts and up to 10 posts per AI batch. Large runs are automatically split into numbered batches.
+- Prompt V6 has a strict anti-template differentiation gate, mandatory `article-1` and `article-2` ad slots, affiliate safety rules, unique photo direction, and an SEO contract.
+- Aura's standardizer still repairs missing ad/image/checklist/takeaway slots and audits SEO on import. “SEO 100” is treated as completion of Aura's technical/content checklist, not a guarantee of search-engine rankings.
 
-## Render settings
+## Deploy
+GitHub Pages: upload all files in this ZIP to the repository root. `index.html` must stay at root.
+
+Render:
+- Build: `npm install`
+- Start: `npm start`
+- Health: `/healthz`
 - `ALLOWED_ORIGINS=https://zayaiken21.github.io`
-- `OPENAI_API_KEY=` needed for photo creation (or add your own key in the app under Connections)
-- `OPENAI_IMAGE_MODEL=gpt-image-1` (the same image model ChatGPT uses)
-- Test engine in the app should show **API 5.3.0**
 
-## Workflow
-1. **Standard & ads:** paste your affiliate list (`Name | link | keywords | button | description`), pick ad placement, cover style and photo speed.
-2. **ChatGPT prompt:** paste your post list (`Title | keyword | notes | affiliate IDs`). Copy one batch at a time into ChatGPT.
-3. ChatGPT returns **one ZIP**: every post, all SEO fields and a detailed brief for every photo.
-4. **Import** the ZIP. Aura checks the Mindful Adaption Standard, completes the SEO (meta title and description, excerpt, focus keyphrase, tags, alt text, media titles and descriptions), places links and ads, and creates every photo automatically — the featured cover with the post title on it, styled for the post's category.
-5. **Preview** (exact WordPress output plus a Google preview and SEO score), then publish or schedule.
+After deploy, **Test Engine** should show API `6.0.0`.
 
-## Staying under limits
-- Photos are created one at a time at your chosen speed (default 4 per minute); Aura waits and retries if OpenAI asks it to slow down, and pauses with a message if your OpenAI quota runs out.
-- Bulk publishing is spaced 2 seconds apart; WordPress busy responses are retried automatically.
-- ChatGPT batches default to 2 posts so each reply finishes in one message.
+## Recommended workflow
+1. Open **Prompt**, paste any number of story ideas, and choose an AI batch size (3 is a strong default; up to 10 is supported).
+2. Copy the generated batch prompt into ChatGPT.
+3. Import each returned ZIP into Aura.
+4. Aura normalizes structure, audits/repairs SEO metadata, guarantees ad slots, matches/generates photos, and validates each post.
+5. Preview and publish/schedule.
+6. After WordPress confirms media, Aura automatically frees those local image blobs.
 
-## Notes
-- Real photos inside a ZIP are used as they are, even with generic names like `image_1.png` (matched in order). Drawn or coded placeholder images are discarded automatically.
-- Side ads float beside the text and FAQ rich results are added when the WordPress user is an Administrator. For other roles, paste the side-card CSS (Standard & ads) into Appearance → Customize → Additional CSS.
-- Meta title, description and focus keyphrase are sent to Yoast / Rank Math. If the site does not accept them from outside, the post still publishes and the excerpt is always saved.
+The standalone `AURA-MASTER-PROMPT-V6.md` is also included for use outside the app.

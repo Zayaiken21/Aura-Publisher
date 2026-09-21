@@ -1,4 +1,4 @@
-// Aura ChatGPT Package Prompt V5 — one ZIP with everything — builds batched prompts that make ChatGPT produce Aura-ready ZIP packages.
+// Aura ChatGPT Package Prompt V6 — one ZIP with everything — builds batched prompts that make ChatGPT produce Aura-ready ZIP packages.
 // Unlimited post lists are split into batches ChatGPT can finish in one reply (no truncated JSON, no rate limits).
 (() => {
   const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -16,8 +16,8 @@
 
   function plan(cfg = {}) {
     const topics = parseTopics(cfg.topics);
-    const size = Math.max(1, Math.min(5, Number(cfg.batchSize) || 2));
-    const total = topics.length || Math.max(1, Math.min(200, Number(cfg.count) || 5));
+    const size = Math.max(1, Math.min(10, Number(cfg.batchSize) || 3));
+    const total = topics.length || Math.max(1, Math.min(1000, Number(cfg.count) || 5));
     const batches = [];
     for (let i = 0; i < total; i += size) batches.push(topics.length ? topics.slice(i, i + size) : Array.from({ length: Math.min(size, total - i) }, () => null));
     return { topics, size, total, batches };
@@ -49,7 +49,7 @@ ${lib.map(a => `| ${adId(a)} | ${clean(a.label || a.name)}${a.text ? ` — ${cle
     const code = `${today}-b${String(n.batchNo).padStart(2, '0')}`;
     const firstNo = bi * pl.size + 1;
     const photos = n.count * 3;
-    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v5) — BATCH ${n.batchNo} OF ${n.batches}
+    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v6) — BATCH ${n.batchNo} OF ${n.batches}
 
 You are a senior editor, SEO strategist, affiliate-content specialist and photo director. You produce finished, publish-ready blog posts and detailed photo briefs for Aura Publisher, which imports your ONE ZIP, creates the photos, places the affiliate links and ads, completes the SEO and publishes every post live to WordPress. Write articles a reader would happily share and Google would want to rank.
 
@@ -79,7 +79,7 @@ ${topicBlock(batch, cfg, n)}
 - Show experience: concrete details, numbers you are sure of (quantities, times, sizes, temperatures), sensory specifics and honest trade-offs. No invented statistics, studies, quotes or experts.
 - FAQ: 4–6 real questions people ask about the topic (the "People also ask" kind), each answered in 40–80 words, without repeating body text.
 
-## 4. The Mindful Adaption Standard v4 (required order for EVERY post)
+## 4. The Mindful Adaption Standard v6 (required order for EVERY post)
 1. **Featured image** — the "featured_image" object (never inside "sections")
 2. **Relatable introduction** — type "intro", 90–150 words: a specific moment, feeling or problem the reader recognises, then a one-sentence promise.
 3. **Key takeaways** — type "takeaways", 3–5 short, specific bullet sentences (what the reader will be able to do).
@@ -96,19 +96,28 @@ ${topicBlock(batch, cfg, n)}
 **Rich blocks — each post uses all of these at least once, spread through the H2 sections:** a "callout" (tone "tip"), a second "callout" (tone "note", "warning" or "example"), one "pullquote" (a line from your own text worth highlighting — never a fake quote from a real person), one "list" (bullets) and one ordered "list" ("ordered": true) for steps. Keep paragraphs to 2–4 sentences.
 Target a **7–8 minute read: 1,650–1,950 words** including the FAQ. Never pad; add depth, specifics and examples.
 
-## 5. Make every post custom
-Give each post a different "format_variant" that shapes tone, H2 style and rhythm: story-led · myth-vs-truth · step-ladder · question-led · framework · science-to-life · seasonal/timely · checklist-deep-dive · mistakes-to-avoid · before-and-after.
-Every post is written from scratch for its own topic — never reuse paragraphs, section text, examples, FAQ answers or checklist items from another post with the keyword swapped. No two posts (in this batch or earlier batches of this conversation) share an intro hook type, H2 wording pattern, checklist opening verb or takeaway phrasing. Banned: "In today's fast-paced world", "Let's dive in", "delve", "game-changer", "unlock your potential", "navigate the complexities", "it's important to note", "in conclusion", "elevate".
-Inline formatting inside text: **bold** (2–4 key phrases per post), *italic*, [anchor](https://url) for editorial links, [anchor](aff:ID) for affiliate links. No HTML, no Markdown headings inside text.
+## 5. Anti-template uniqueness gate — REQUIRED
+Before writing, privately build a **batch differentiation matrix**. For each post choose a distinct reader situation, search intent, opening mechanism, structural arc, examples, H2 syntax pattern, checklist style, closing move, featured-photo composition and two inline-photo situations. Do not print the matrix.
+
+Use a different 'format_variant' for each post until the list is exhausted: story-led · field-guide · diagnostic · myth-vs-truth · step-ladder · question-led · framework · science-to-life · seasonal/timely · checklist-deep-dive · mistakes-to-avoid · before-and-after · decision-tree · case-study · beginner-roadmap · troubleshooting · comparison · weekend-project · 30-day-plan · reference-guide.
+
+**Similarity rejection rule:** after drafting the batch, compare every pair of posts. Rewrite a post if any of these are substantially alike: first 120 words; sequence/purpose of H2s; more than two H2 opening words; examples/scenarios; checklist verbs; FAQ questions; closing phrasing; photo setting/action. A paragraph should NOT be reusable in another article merely by swapping the keyword.
+
+Never use a fixed H2 template across the batch. Do not force every article to contain the same "what/why/how/mistakes" sequence; satisfy search intent with a custom outline. The required Aura blocks may appear at different natural points while preserving the required image/ad/checklist/takeaway order.
+
+Banned filler: "In today's fast-paced world", "Let's dive in", "delve", "game-changer", "unlock your potential", "navigate the complexities", "it's important to note", "in conclusion", "elevate", "whether you're a beginner or expert". Never invent first-person experience, studies, experts, statistics, prices or product claims.
+
+Inline formatting inside text: **bold** (2–4 key phrases per post), *italic*, [anchor](https://url) for editorial links, and only when affiliate IDs exist, [anchor](aff:ID). No HTML and no Markdown headings inside text.
 
 ## 6. Affiliate links and ads — placed where they genuinely fit
 ${affiliateBlock(cfg.ads)}
 
 Rules:
-- **In-text links:** 2–4 per post as [natural anchor text](aff:ID) inside paragraphs where the product truly helps at that moment. Each ID at most once per post. Never in the intro's first two sentences, headings, takeaways, FAQ, checklist or closing takeaway. Anchors are descriptive (2–5 words), never "click here" or "buy now".
-- **Ad sections (article-1, article-2):** set "ad_id" to the best-fitting ID for that section and write fresh "label" (max 60 chars), "text" (one honest sentence tying the product to THIS section) and "cta" (2–4 words). Leave "url" as "". Use different IDs in the two slots when possible.
-- **Featured IDs:** when a post in section 2 lists affiliate IDs, feature each at least once in that post.
-- If nothing fits a section, write "ad_id": "" — Aura picks the most relevant one. Never force an irrelevant product. Aura adds labels, banner, side cards, resources list and disclosure itself; do not write disclosures.
+- **Ad placements are mandatory in EVERY article even when no affiliate library is supplied.** Every post must contain 'article-1' and 'article-2'; Aura may add additional layout placements at publish time. Never omit an ad object because no product fits.
+- If affiliate IDs are available, use 2–4 natural [anchor text](aff:ID) links where products genuinely help. Each ID at most once per post. Never in headings, takeaways, FAQ, checklist or closing takeaway.
+- If NO affiliate IDs are available, write ZERO 'aff:' links. Keep both ad objects with 'ad_id' and 'url' empty so Aura can fill them later.
+- **Ad sections (article-1, article-2):** write a fresh context-specific 'label', one-sentence 'text', and 2–4 word 'cta'; set 'ad_id' to the best matching supplied ID or empty string, and 'url' to empty string.
+- Never invent an affiliate product, URL, price, discount, rating, endorsement or claim. Aura supplies disclosure, top banner, side cards, text-link conversion and end resources from its saved library.
 
 ## 7. Photos — detailed briefs Aura turns into real photographs
 Every post has **1 featured cover + 2 inline photos**. Your briefs decide how good they are, so make them specific to THIS post's category and title.
@@ -131,7 +140,7 @@ Fields for every photo:
 - "prompt": 100–160 words, a photographer's brief: "Photorealistic, vibrant editorial lifestyle photograph. [shot] of [people] [action] in [setting], [time of day], [lighting]. Human connection: [emotion], candid, not looking at the camera. Shot on a full-frame camera with a [lens]; layered composition with [3 real props] in the foreground. [palette]. [mood]. Natural skin texture, realistic hands, true-to-life colour, rich detail. Not an illustration, cartoon, vector or 3D render." Inline prompts add "No text, letters or logos anywhere". Landscape 3:2.
 - Every prompt is written for its own photo. Never reuse a prompt template across posts.
 
-## 8. SEO fields (every post)
+## 8. SEO contract (every post — Aura audits and repairs metadata again on import)
 - "title": 50–60 characters, primary keyword near the start, specific benefit, human not clickbait
 - "meta_title": ≤ 60 characters (may equal the title or add a brand/benefit)
 - "meta_description": 140–155 characters, one or two complete sentences with the primary keyword and a clear reason to click; never cut off
@@ -139,12 +148,15 @@ Fields for every photo:
 - "focus_keyphrase": the primary keyword exactly
 - "slug": lowercase-hyphenated, 3–6 words, primary keyword included
 - "primary_keyword" + 3–5 "secondary_keywords" · "categories": 1–2 · "tags": 4–6 specific tags · "status": "publish"
+- Search intent must be explicit in the article itself. Avoid keyword cannibalization: no two posts in this batch may target the same primary keyword or near-identical slug.
+- Include useful internal-link opportunities as natural anchor phrases, but never invent URLs. Aura can add related published posts at publish time.
+- SEO score is a quality checklist, not a ranking guarantee; factual usefulness and satisfying intent outrank keyword repetition.
 
 ## 9. Exact output — aura-posts.json
 \`\`\`json
 {
-  "protocol": "aura-12",
-  "standard": "Mindful Adaption Standard v4",
+  "protocol": "aura-13",
+  "standard": "Mindful Adaption Standard v6",
   "generated": "${code}",
   "posts": [
     {

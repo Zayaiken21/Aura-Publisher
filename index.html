@@ -7,7 +7,7 @@
 <title>Aura Publisher Pro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=12.0.1">
+<link rel="stylesheet" href="styles.css?v=13.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -106,7 +106,7 @@
         <span class="grow"></span>
         <button id="genAll">Create missing photos</button>
         <button id="publishAll" class="primary">Publish all ready</button>
-        <button id="clearAll" class="ghost danger">Clear queue</button>
+        <button id="clearAll" class="ghost danger">Clear all</button>
       </div>
       <div id="photoRun" class="photorun" hidden>
         <div class="row between"><span><b>Photos</b> <span id="photoRunCount"></span></span><button id="photoPause" class="ghost sm">Pause</button></div>
@@ -122,7 +122,7 @@
     <section id="import" class="tab">
       <div class="panel">
         <h2>Import a package</h2>
-        <p class="muted">Drop the one ZIP ChatGPT made from the Aura prompt. Aura checks every post against the Mindful Adaption Standard, completes the SEO, places your links and ads, and starts creating every photo automatically — the cover with the post title on it. Real photos already in the ZIP are used as they are (any file names); drawn placeholders are thrown out.</p>
+        <p class="muted">Drop the one ZIP made from the Aura prompt. Aura normalizes every post, repairs SEO metadata, guarantees ad slots, matches or creates photos, validates the package, and prepares WordPress publishing. Published image files are automatically released from local storage after WordPress confirms them.</p>
         <div class="drop" id="drop" tabindex="0">
           <strong>Tap to choose your ZIP</strong><span>or drop it here · ZIP · JSON · CSV · DOCX · PDF · MD · TXT · HTML</span>
           <b class="picked" id="filesPicked" hidden></b>
@@ -161,7 +161,7 @@
         </div>
         <label>Image style (added to every image prompt)<textarea id="stStyle" rows="3"></textarea></label>
         <p class="hint">Every image also gets its own art direction from the section it sits in: shot, lens, light, time of day, setting, people and props, chosen so no two images in a post (or in your recent posts) repeat.</p>
-        <div class="row"><button id="saveStandard" class="primary">Save standard</button><button id="reapply">Re-apply to queue</button></div>
+        <div class="row"><button id="saveStandard" class="primary">Save standard</button><button id="reapply">Optimize SEO + re-apply standard</button></div>
       </div>
 
       <div class="panel">
@@ -221,8 +221,8 @@
         </label>
         <label>Extra information for every post (facts, offers, rules)<textarea id="pExtra" rows="3" placeholder="e.g. Mention our free 7-day guide. Never give medical advice."></textarea></label>
         <div class="grid3">
-          <label>Posts when no list<input id="pCount" type="number" min="1" max="200" value="5"></label>
-          <label>Posts per batch<select id="pBatchSize"><option value="1">1 (most detailed)</option><option value="2">2 (recommended)</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+          <label>Posts when no list<input id="pCount" type="number" min="1" max="1000" value="5"><small class="hint">Aura can plan large runs and splits them into safe AI batches.</small></label>
+          <label>Posts per AI batch<select id="pBatchSize"><option value="1">1 (maximum depth)</option><option value="2">2</option><option value="3">3 (recommended)</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10 (large response)</option></select><small class="hint">Generate any total; Aura creates as many numbered batches as needed.</small></label>
           <label>Batch<select id="pBatch"></select></label>
         </div>
         <div class="row wrap"><button id="copyPrompt" class="primary">Copy this batch</button><button id="nextBatch">Next batch →</button><button id="dlPrompt">Download all batches (.md)</button></div>
@@ -304,9 +304,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=12.0.1"></script>
-<script src="aura-vault.js?v=12.0.1"></script>
-<script src="aura-prompt.js?v=12.0.1"></script>
-<script src="aura-app.js?v=12.0.1"></script>
+<script src="config.js?v=13.0.0"></script>
+<script src="aura-vault.js?v=13.0.0"></script>
+<script src="aura-prompt.js?v=13.0.0"></script>
+<script src="aura-v13.js?v=13.0.0"></script>
 </body>
 </html>
