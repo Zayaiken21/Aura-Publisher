@@ -1,7 +1,9 @@
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import multer from 'multer'; import AdmZip from 'adm-zip'; import mammoth from 'mammoth'; import pdf from 'pdf-parse';
 const app=express(), upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:100}}); const PORT=process.env.PORT||8787;
-const origins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
-app.use(helmet({crossOriginResourcePolicy:false})); app.use(cors({origin:(o,cb)=>!o||origins.includes(o)?cb(null,true):cb(new Error('Origin not allowed'))})); app.use(express.json({limit:'10mb'})); app.use(rateLimit({windowMs:60000,limit:120}));
+const defaultOrigins=['https://zayaiken21.github.io'];
+const origins=[...new Set([...defaultOrigins,...(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)])];
+const corsOptions={origin:(origin,cb)=>{if(!origin||origins.includes(origin))return cb(null,true);console.warn('Blocked CORS origin:',origin);return cb(new Error('Origin not allowed'));},methods:['GET','POST','OPTIONS'],allowedHeaders:['Content-Type','x-aura-token','Authorization']};
+app.use(helmet({crossOriginResourcePolicy:false})); app.use(cors(corsOptions)); app.options(/.*/,cors(corsOptions)); app.use(express.json({limit:'10mb'})); app.use(rateLimit({windowMs:60000,limit:120}));
 const guard=(req,res,next)=>{if(process.env.ADMIN_TOKEN && req.get('x-aura-token')!==process.env.ADMIN_TOKEN)return res.status(401).json({error:'Unauthorized'});next()};
 const authHeader=w=>`Basic ${Buffer.from(`${w.username}:${w.appPassword}`).toString('base64')}`;
 const wpFetch=async(w,path,opts={})=>{const r=await fetch(`${w.url.replace(/\/$/,'')}/wp-json/wp/v2/${path}`,{...opts,headers:{Authorization:authHeader(w),...(opts.headers||{})}}); const t=await r.text(); let j;try{j=JSON.parse(t)}catch{j={raw:t}} if(!r.ok)throw new Error(j.message||`WordPress ${r.status}`);return j};
