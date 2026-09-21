@@ -8,8 +8,8 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '5.1.0';
-const PROTOCOL = '11.1';
+const API_VERSION = '5.2.0';
+const PROTOCOL = '11.3';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -155,7 +155,13 @@ function normalizeSection(s) {
   if (type === 'ad') return normalizeAd(s);
   if (type === 'checklist') return { type, title: s.title || '', items: Array.isArray(s.items) ? s.items.map(String) : arr(s.items) };
   if (type === 'list' || type === 'bullets') return { type: 'list', ordered: !!s.ordered, items: Array.isArray(s.items) ? s.items.map(String) : arr(s.items) };
-  if (type === 'callout' || type === 'tip' || type === 'quote') return { type: 'callout', label: s.label ?? (type === 'quote' ? '' : 'Tip'), content: pick(s, 'content', 'text') };
+  if (type === 'callout' || type === 'tip' || type === 'note' || type === 'warning' || type === 'example') return { type: 'callout', tone: ['tip', 'note', 'warning', 'example'].includes(String(s.tone || type).toLowerCase()) ? String(s.tone || type).toLowerCase() : 'tip', label: s.label ?? ({ note: 'Good to know', warning: 'Watch out', example: 'Example' }[type] || 'Try this'), content: pick(s, 'content', 'text') };
+  if (type === 'quote' || type === 'pullquote') return { type: 'pullquote', content: pick(s, 'content', 'text', 'quote'), cite: s.cite || s.attribution || '' };
+  if (type === 'takeaways' || type === 'key_takeaways' || type === 'summary') return { type: 'takeaways', title: s.title || 'Key takeaways', items: (Array.isArray(s.items) ? s.items.map(String) : arr(s.items)).filter(Boolean).slice(0, 6) };
+  if (type === 'faq' || type === 'faqs') {
+    const items = (Array.isArray(s.items) ? s.items : []).map(q => ({ q: String(pick(q, 'q', 'question')).trim(), a: String(pick(q, 'a', 'answer')).trim() })).filter(q => q.q && q.a).slice(0, 8);
+    return items.length ? { type: 'faq', title: s.title || 'Frequently asked questions', items } : null;
+  }
   return { type: type === 'intro' ? 'intro' : type === 'html' ? 'html' : 'paragraph', content: pick(s, 'content', 'text', 'html') };
 }
 function normalizePost(raw = {}) {
@@ -174,6 +180,8 @@ function normalizePost(raw = {}) {
   return {
     post_id: postId, title, slug: s,
     excerpt: pick(raw, 'excerpt', 'description', 'meta_description'),
+    meta_title: String(pick(raw, 'meta_title', 'seo_title')).trim(), meta_description: String(pick(raw, 'meta_description', 'seo_description')).trim(),
+    focus_keyphrase: String(pick(raw, 'focus_keyphrase', 'focus_keyword')).trim(),
     primary_keyword: raw.primary_keyword || '', secondary_keywords: arr(raw.secondary_keywords),
     format_variant: raw.format_variant || '', hero_text: clip(raw.hero_text || '', 60),
     categories: arr(pick(raw, 'categories', 'category')), tags: arr(raw.tags),
@@ -264,6 +272,27 @@ function applyStandard(input, o = {}) {
     if (insA.length + insB.length) notes.push(`Filled ${insA.length + insB.length} missing image/ad slot(s)`);
   }
 
+  // SEO fields: clean excerpt / meta description / meta title that never end mid-word
+  const sentenceClip = (t, max) => {
+    t = stripHtml(String(t || '')).replace(/\*\*|\*/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
+    if (t.length <= max) return t;
+    const cut = t.slice(0, max + 1), end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+    if (end > max * 0.6) return cut.slice(0, end + 1);
+    return cut.slice(0, cut.lastIndexOf(' ')).replace(/[,;:—–-]+$/, '') + '…';
+  };
+  const cutOff = t => t && t.length >= 120 && !/[.!?…"')]$/.test(t.trim());
+  const introText = s.find(x => x.type === 'intro')?.content || '';
+  if (!p.meta_description || cutOff(p.meta_description) || p.meta_description.length > 165) { const before = p.meta_description; p.meta_description = sentenceClip(p.meta_description && !cutOff(p.meta_description) ? p.meta_description : (p.excerpt && !cutOff(p.excerpt) ? p.excerpt : introText), 158); if (before !== p.meta_description) notes.push('Wrote a clean meta description'); }
+  if (!p.excerpt || cutOff(p.excerpt) || p.excerpt.length > 300) { p.excerpt = p.meta_description; notes.push('Fixed a cut-off excerpt'); }
+  if (!p.meta_title) p.meta_title = clip(p.title, 60);
+  if (!p.focus_keyphrase) p.focus_keyphrase = p.primary_keyword || '';
+  // Key takeaways box right after the intro (built from the H2s when ChatGPT did not supply one)
+  if (enforce && !s.some(x => x.type === 'takeaways')) {
+    const h2s = s.filter(x => x.type === 'heading' && x.level === 2 && !TAKEAWAY_RE.test(x.content) && !/checklist|faq|frequently asked/i.test(x.content)).map(x => x.content.replace(/^(step \d+:\s*)/i, '').replace(/[.?!:]+$/, ''));
+    const at = s.findIndex(x => x.type === 'intro');
+    if (h2s.length >= 3 && at > -1) { s.splice(at + 1, 0, { type: 'takeaways', title: "What you'll learn", items: h2s.slice(0, 5) }); notes.push('Added a "What you\'ll learn" box from the section headings'); }
+  }
+
   // Unique ad slot names
   const used = new Set(); let n = 0;
   for (const x of s) if (x.type === 'ad') { n++; if (!x.slot || used.has(x.slot)) x.slot = `article-${n}`; while (used.has(x.slot)) x.slot = `article-${++n}`; used.add(x.slot); }
@@ -296,7 +325,7 @@ function applyStandard(input, o = {}) {
   if (capFixed) notes.push(`Removed ${capFixed} repeated caption${capFixed > 1 ? 's' : ''}`);
 
   // Stats
-  const words = s.reduce((t, x) => t + countWords([x.content, x.label, ...(x.items || [])].filter(Boolean).join(' ')), 0);
+  const words = s.reduce((t, x) => t + (x.type === 'takeaways' ? 0 : countWords([x.content, x.label, x.cite, ...(x.items || []).map(it => typeof it === 'object' ? `${it.q} ${it.a}` : it)].filter(Boolean).join(' '))), 0);
   const minutes = Math.max(1, Math.round(words / 230));
   const h2 = s.filter(x => x.type === 'heading' && x.level === 2).length;
   if (enforce) {
@@ -529,13 +558,15 @@ function artDirect(p, o = {}) {
     const headline = heroText ? ` Headline: large, bold, hand-painted brush-script lettering integrated into the scene like a premium magazine cover, reading exactly "${heroText}" — spelled exactly, fully legible, placed over a calm area so no faces are covered.` : '';
     const purpose = role === 'hero' ? `This is the featured image for "${p.title}". It must make a reader feel the article's promise at a glance: abundant, warm, human and richly detailed, working as a wide 3:2 header.${contrast}${headline}` : `This image sits inside the section "${ctx.heading}" of "${p.title}" and must show that section's specific idea through the people in it${summary ? `: ${summary}` : '.'}`;
     const base = isDefaultPrompt(img.prompt) || img.generic_prompt ? '' : String(img.prompt).trim();
-    briefs.push({ img, base, art, purpose, sig: choice.sig, choice, heroText, scene });
+    const camera = `Camera: ${choice.lens}, ${choice.light}; layered composition with rich foreground detail; colour ${choice.palette}, vibrant but natural. Human connection must read clearly: genuine emotion, candid, not looking at the camera.`;
+    briefs.push({ img, base, art, camera, purpose, sig: choice.sig, choice, heroText, scene });
   }
   briefs.forEach((b, i) => {
     const others = briefs.filter((_, j) => j !== i);
     const tooClose = b.base && others.some(x => x.base && jaccard(b.base, x.base) > 0.45);
     const avoid = others.map(x => `${x.choice.shot} in ${x.choice.setting}`).join('; ');
-    const core = b.base ? (tooClose ? `${b.base}\nComposition override so this image is clearly different from the others: ${b.art}` : `${b.base}\nPeople and camera: ${b.art}`) : b.art;
+    // ChatGPT's own detailed brief is kept as the scene; Aura only adds camera and realism so nothing contradicts it
+    const core = b.base ? (tooClose ? `${b.base}\nComposition override so this image is clearly different from the others: ${b.art}` : `${b.base}\n${b.camera}`) : b.art;
     b.img.render_prompt = `Photorealistic, vibrant editorial lifestyle photograph. ${core}\n${b.purpose}\nMust look clearly different from the other images in this article (${avoid || 'none'}).\n${realism(!!b.heroText)}`;
     b.img.sig = b.sig;
     b.img.art = { scene: b.scene, shot: b.choice.shot, setting: b.choice.setting, time_of_day: b.choice.time, lighting: b.choice.light, lens: b.choice.lens, palette: b.choice.palette, headline: b.heroText || '' };
@@ -739,7 +770,7 @@ function planAds(p, o = {}) {
   if (L.top && budget > 0) {
     const topText = `${p.title} ${intro > -1 ? s[intro].content : ''}`;
     const a = choose(topText, 'top', { exclude: new Set([...uses.keys()]), minRel: 2 }) || choose(topText, 'top', { minRel: 2 });
-    if (a) { plan.top = a; plan.topAt = L.topPosition === 'before-intro' ? -1 : Math.max(0, intro); use(a); budget--; }
+    if (a) { const tk = s.findIndex(x => x.type === 'takeaways'); plan.top = a; plan.topAt = L.topPosition === 'before-intro' ? -1 : Math.max(0, tk === intro + 1 ? tk : intro); use(a); budget--; }
   }
   // 3. Side cards beside long, ad-free H2 sections, spaced apart
   if (L.side && budget > 0) {
@@ -824,46 +855,87 @@ function endList(ads, o) {
 <p style="margin:.6em 0 0;font-size:12px;color:#667085">${adLabel(o)} links</p></aside>`);
 }
 
+// ---------- page design: every block carries its own inline styles, so it looks finished in any theme ----------
+const TONES = { tip: ['#0d64bc', '#eef5fd', '💡'], note: ['#475467', '#f4f6f9', '📌'], warning: ['#b54708', '#fff7ed', '⚠️'], example: ['#067647', '#effaf5', '✍️'] };
+const anchorOf = (t, used) => { let a = slug(stripHtml(t)).slice(0, 60) || 'section', b = a, n = 2; while (used.has(b)) b = `${a}-${n++}`; used.add(b); return b; };
+const box = (inner, style, cls) => block('html', `<div class="${cls}" style="${style}">${inner}</div>`);
+
 function renderPost(p, media, o = {}) {
   const plan = planAds(p, o), L = plan.L;
   const rc = { plan, linked: new Set(), linksUsed: 0, affiliate: false };
-  // Links ChatGPT placed on purpose ([text](aff:ID)) win: those ads are never auto-linked a second time.
-  for (const x of p.sections || []) for (const m of String([x.content, ...(x.items || [])].join(' ')).matchAll(/\]\(aff:([\w.-]+)\)/g)) { const ad = plan.byId.get(slug(m[1])); if (ad) rc.linked.add(ad.id); }
+  for (const x of p.sections || []) for (const m of String([x.content, ...(x.items || []).map(it => typeof it === 'object' ? `${it.q} ${it.a}` : it)].join(' ')).matchAll(/\]\(aff:([\w.-]+)\)/g)) { const ad = plan.byId.get(slug(m[1])); if (ad) rc.linked.add(ad.id); }
   const out = [], s = p.sections;
   const stats = { top: 0, side: 0, inline: 0, end: 0, textLinks: 0 };
   const unit = (ad, kind, slot) => { if (ad?.url) rc.affiliate = true; stats[kind === 'side' ? 'side' : kind]++; return adUnit(ad, kind, o, slot); };
+  const design = o.design !== false;
+  const used = new Set();
+  const anchors = new Map(); // section index -> anchor
+  s.forEach((x, i) => { if (x.type === 'heading' && x.level === 2) anchors.set(i, anchorOf(x.content, used)); if (x.type === 'faq') anchors.set(i, anchorOf(x.title, used)); });
+  const tocItems = [...anchors].map(([i, a]) => ({ a, t: s[i].type === 'faq' ? s[i].title : s[i].content })).filter(x => !/^key takeaways$/i.test(x.t));
+  const tocBlock = () => box(`<p style="margin:0 0 10px;font-weight:700;font-size:15px;letter-spacing:.02em">In this article</p><ol style="margin:0;padding-left:1.3em;columns:2 240px;column-gap:28px">${tocItems.map(x => `<li style="margin:.3em 0;break-inside:avoid"><a href="#${x.a}" style="text-decoration:none">${esc(stripHtml(x.t).replace(/\*\*/g, ''))}</a></li>`).join('')}</ol>`,
+    'margin:1.6em 0;padding:18px 22px;border:1px solid #e3e8ef;border-radius:14px;background:#fbfcfe;font-size:15px', 'aura-toc');
+  let tocDone = !(design && tocItems.length >= 4), topWaiting = false;
+  const takeIdx = s.findIndex(x => x.type === 'heading' && TAKEAWAY_RE.test(x.content));
   if (plan.top && plan.topAt === -1) out.push(unit(plan.top, 'top'));
   s.forEach((x, i) => {
     const prev = s[i - 1];
     switch (x.type) {
-      case 'heading': out.push(x.level === 2 ? block('heading', `<h2 class="wp-block-heading">${inlineRich(x.content, rc, false)}</h2>`) : block('heading', `<h${x.level} class="wp-block-heading">${inlineRich(x.content, rc, false)}</h${x.level}>`, { level: x.level })); break;
-      case 'intro': out.push(block('paragraph', `<p class="aura-intro">${inlineRich(x.content, rc, false)}</p>`, { className: 'aura-intro' })); break;
+      case 'heading': {
+        const a = anchors.get(i), attrs = a ? { anchor: a, ...(x.level !== 2 ? { level: x.level } : {}) } : (x.level !== 2 ? { level: x.level } : null);
+        if (!tocDone && x.level === 2) { out.push(tocBlock()); tocDone = true; if (topWaiting) { out.push(unit(plan.top, 'top')); topWaiting = false; } }
+        out.push(block('heading', `<h${x.level} class="wp-block-heading"${a ? ` id="${a}"` : ''}>${inlineRich(x.content, rc, false)}</h${x.level}>`, attrs));
+        break;
+      }
+      case 'intro': out.push(block('paragraph', `<p class="aura-intro" style="font-size:1.15em;line-height:1.65">${inlineRich(x.content, rc, false)}</p>`, { className: 'aura-intro' })); break;
+      case 'takeaways': out.push(box(`<p style="margin:0 0 10px;font-weight:700;font-size:1.05em">${esc(x.title)}</p><ul style="margin:0;padding:0;list-style:none">${x.items.map(it => `<li style="margin:.45em 0;padding-left:1.7em;position:relative"><span aria-hidden="true" style="position:absolute;left:0;color:#067647;font-weight:700">✓</span>${inlineRich(it, rc, false)}</li>`).join('')}</ul>`,
+        'margin:1.6em 0;padding:20px 22px;border-radius:16px;background:linear-gradient(135deg,#effaf5,#eef5fd);border:1px solid #d5ece1', 'aura-takeaways')); break;
       case 'image': {
         const m = media[lc(x.filename)];
         if (!m) { out.push(`<!-- AURA:MISSING:${esc(x.filename)} -->`); break; }
-        const cap = x.caption ? `<figcaption class="wp-element-caption">${esc(x.caption)}</figcaption>` : '';
-        out.push(block('image', `<figure class="wp-block-image size-large"><img src="${esc(m.source_url)}" alt="${esc(x.alt_text)}" class="wp-image-${m.id}"/>${cap}</figure>`, { id: m.id, sizeSlug: 'large', linkDestination: 'none' }));
+        const cap = x.caption ? `<figcaption class="wp-element-caption" style="text-align:center;font-size:.9em;color:#667085;margin-top:.6em">${esc(x.caption)}</figcaption>` : '';
+        out.push(block('image', `<figure class="wp-block-image size-large${design ? ' is-style-rounded-corners' : ''}" style="margin:2em 0"><img src="${esc(m.source_url)}" alt="${esc(x.alt_text)}" class="wp-image-${m.id}" style="border-radius:14px;box-shadow:0 10px 30px rgba(16,24,40,.12)"/>${cap}</figure>`, { id: m.id, sizeSlug: 'large', linkDestination: 'none' }));
         break;
       }
       case 'ad': { const u = plan.inline.get(i); out.push(unit(u?.ad, u?.kind || 'inline', x.slot)); break; }
-      case 'list': { const tag = x.ordered ? 'ol' : 'ul'; out.push(block('list', `<${tag} class="wp-block-list">${x.items.map(it => `<!-- wp:list-item -->\n<li>${inlineRich(it, rc, false)}</li>\n<!-- /wp:list-item -->`).join('\n')}</${tag}>`, x.ordered ? { ordered: true } : null)); break; }
+      case 'list': { const tag = x.ordered ? 'ol' : 'ul'; out.push(block('list', `<${tag} class="wp-block-list" style="padding-left:1.3em">${x.items.map(it => `<!-- wp:list-item -->\n<li style="margin:.4em 0">${inlineRich(it, rc, false)}</li>\n<!-- /wp:list-item -->`).join('\n')}</${tag}>`, x.ordered ? { ordered: true } : null)); break; }
       case 'checklist': {
         if (x.title && prev?.type !== 'heading') out.push(block('heading', `<h2 class="wp-block-heading">${inlineRich(x.title, rc, false)}</h2>`));
-        out.push(block('html', `<ul class="aura-checklist" style="list-style:none;padding-left:0">${x.items.map(it => `<li style="margin:.55em 0;padding-left:1.8em;position:relative"><span aria-hidden="true" style="position:absolute;left:0">☐</span>${inlineRich(it, rc, false)}</li>`).join('')}</ul>`));
+        out.push(block('html', `<ul class="aura-checklist" style="list-style:none;margin:1.2em 0;padding:18px 22px;border:1px solid #e3e8ef;border-radius:16px;background:#fbfcfe">${x.items.map((it, k) => `<li style="margin:${k ? '.7em' : '0'} 0 0;padding:${k ? '.7em' : '0'} 0 0 2.1em;position:relative;${k ? 'border-top:1px dashed #e3e8ef' : ''}"><span aria-hidden="true" style="position:absolute;left:0;top:${k ? '.7em' : '0'};width:1.3em;height:1.3em;border:2px solid #0d64bc;border-radius:5px;display:inline-block"></span>${inlineRich(it, rc, false)}</li>`).join('')}</ul>`));
         break;
       }
-      case 'callout': out.push(block('html', `<aside class="aura-callout" style="margin:1.6em 0;padding:16px 20px;border-left:4px solid #0d64bc;background:#f2f7fd;border-radius:8px">${x.label ? `<p style="margin:0 0 6px;font-weight:700">${esc(x.label)}</p>` : ''}<p style="margin:0">${inlineRich(x.content, rc, false)}</p></aside>`)); break;
+      case 'callout': {
+        const [c, bg, ic] = TONES[x.tone] || TONES.tip;
+        out.push(block('html', `<aside class="aura-callout aura-callout--${x.tone || 'tip'}" style="margin:1.8em 0;padding:16px 20px;border-left:4px solid ${c};background:${bg};border-radius:10px">${x.label ? `<p style="margin:0 0 6px;font-weight:700;color:${c}">${ic} ${esc(x.label)}</p>` : ''}<p style="margin:0">${inlineRich(x.content, rc, false)}</p></aside>`));
+        break;
+      }
+      case 'pullquote': out.push(block('pullquote', `<figure class="wp-block-pullquote" style="margin:2.2em 0;padding:1.4em 1em;border-top:3px solid #0d64bc;border-bottom:3px solid #0d64bc;text-align:center"><blockquote><p style="font-size:1.35em;line-height:1.45;font-style:italic">${inlineRich(x.content, rc, false)}</p>${x.cite ? `<cite style="font-size:.85em;color:#667085">${esc(x.cite)}</cite>` : ''}</blockquote></figure>`)); break;
+      case 'faq': {
+        const a = anchors.get(i);
+        out.push(block('heading', `<h2 class="wp-block-heading" id="${a}">${esc(x.title)}</h2>`, { anchor: a }));
+        for (const it of x.items) out.push(block('details', `<details class="wp-block-details" style="margin:.7em 0;padding:14px 18px;border:1px solid #e3e8ef;border-radius:12px;background:#fbfcfe"><summary style="font-weight:600;cursor:pointer">${esc(it.q)}</summary>\n<!-- wp:paragraph -->\n<p style="margin:.7em 0 0">${inlineRich(it.a, rc, false)}</p>\n<!-- /wp:paragraph --></details>`));
+        break;
+      }
       case 'html': out.push(block('html', x.content)); break;
-      default: out.push(block('paragraph', `<p>${inlineRich(x.content, rc, true)}</p>`));
+      default: {
+        const closing = takeIdx > -1 && i === takeIdx + 1 && prev?.type === 'heading';
+        if (closing && design) out.push(box(`<p style="margin:0;font-size:1.1em;line-height:1.65">${inlineRich(x.content, rc, false)}</p>`, 'margin:1.2em 0 1.8em;padding:22px 24px;border-radius:16px;background:linear-gradient(135deg,#0d64bc,#0a3c8f);color:#fff', 'aura-closing'));
+        else out.push(block('paragraph', `<p>${inlineRich(x.content, rc, true)}</p>`));
+      }
     }
-    if (plan.top && plan.topAt === i) out.push(unit(plan.top, 'top'));
+    if (plan.top && plan.topAt === i) { if (tocDone) out.push(unit(plan.top, 'top')); else topWaiting = true; } // banner sits after the contents box, never between intro and takeaways
     if (plan.side.has(i)) out.push(unit(plan.side.get(i), 'side'));
   });
+  // Keep reading: other posts from this queue already live on the site
+  const related = (o.related || []).filter(r => r?.link && r.title && r.link !== o.selfLink).slice(0, 3);
+  if (design && related.length) out.push(box(`<p style="margin:0 0 10px;font-weight:700">Keep reading</p><ul style="margin:0;padding-left:1.1em">${related.map(r => `<li style="margin:.35em 0"><a href="${esc(r.link)}">${esc(r.title)}</a></li>`).join('')}</ul>`, 'margin:2em 0 1em;padding:18px 22px;border-radius:14px;background:#f4f6f9', 'aura-related'));
   if (plan.end.length) { out.push(endList(plan.end, o)); stats.end = plan.end.length; rc.affiliate = true; }
   stats.textLinks = rc.linksUsed;
   const head = [];
   if (o.css && (stats.side || stats.top)) head.push(block('html', `<style>${AD_CSS}</style>`));
   if (L.disclosure && rc.affiliate) head.push(block('paragraph', `<p class="aura-disclosure" style="font-size:13px;color:#667085;font-style:italic">${esc(L.disclosureText)}</p>`, { className: 'aura-disclosure' }));
+  // FAQ rich results (needs a user WordPress lets post <script>, i.e. unfiltered_html)
+  const faqs = s.filter(x => x.type === 'faq').flatMap(x => x.items);
+  if (o.css && faqs.length) out.push(block('html', `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(f => ({ '@type': 'Question', name: stripHtml(f.q), acceptedAnswer: { '@type': 'Answer', text: stripHtml(f.a).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\*\*/g, '') } })) }).replace(/</g, '\\u003c')}</script>`));
   const html = [...head, ...out].join('\n\n');
   if (o.withStats) return { html, stats };
   return html;
@@ -1046,7 +1118,7 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
     for (const x of p.categories) { const id = await termId(creds, 'categories', x, cache); if (id) cats.push(id); }
     for (const x of p.tags) { const id = await termId(creds, 'tags', x, cache); if (id) tags.push(id); }
     const featured = p.featured_image?.filename ? media[lc(p.featured_image.filename)]?.id || 0 : 0;
-    const rendered = renderPost(p, media, { ...o, withStats: true });
+    const rendered = renderPost(p, media, { ...o, selfLink: o.selfLink || '', withStats: true });
     const body = { title: p.title, slug: p.slug, excerpt: p.excerpt, content: rendered.html, status, categories: cats, tags, featured_media: featured };
     if (date) body.date = date;
 
@@ -1060,7 +1132,12 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
       }
     }
     const out = await wpFetch(creds, target ? `posts/${target}` : 'posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    res.json({ ok: true, id: out.id, link: out.link, status: out.status, updated: !!target, uploadedImages: uploaded, reusedImages: reused, placements: rendered.stats, sideCss: o.css,
+    let seoMeta = 'skipped';
+    if (p.meta_title || p.meta_description || p.focus_keyphrase) {
+      const meta = { rank_math_title: p.meta_title, rank_math_description: p.meta_description, rank_math_focus_keyword: p.focus_keyphrase, _yoast_wpseo_title: p.meta_title, _yoast_wpseo_metadesc: p.meta_description, _yoast_wpseo_focuskw: p.focus_keyphrase };
+      try { await wpFetch(creds, `posts/${out.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meta }) }); seoMeta = 'sent'; } catch { seoMeta = 'not supported by this site'; }
+    }
+    res.json({ ok: true, id: out.id, link: out.link, status: out.status, updated: !!target, seoMeta, uploadedImages: uploaded, reusedImages: reused, placements: rendered.stats, sideCss: o.css,
       media: Object.fromEntries(imageList(p).map(i => [i.filename, media[lc(i.filename)]]).filter(([, m]) => m)) });
   } catch (e) { const o = wpError(e); res.status(o.status === 401 ? 401 : 400).json(o); }
 });

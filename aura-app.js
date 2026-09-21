@@ -15,7 +15,7 @@
     ads: [], adLabel: 'Sponsored',
     adLayout: { top: true, topPosition: 'after-intro', side: true, sideMax: 2, textLinks: true, textLinkMax: 3, end: true, endMax: 3, disclosure: true, disclosureText: 'This post contains affiliate links. If you buy through them, we may earn a small commission at no extra cost to you.', wordsPerAd: 350 },
     publish: { status: 'publish', mode: 'upsert', gapDays: 0 },
-    prompt: { siteName: '', niche: '', audience: '', voice: '', topics: '', extra: '', count: 5, batchSize: 3, batch: 0 },
+    prompt: { siteName: '', niche: '', audience: '', voice: '', topics: '', extra: '', count: 5, batchSize: 2, batch: 0 },
     autoLockMin: 30
   };
   const merge = (a, b) => { const o = structuredClone(a); for (const k in b || {}) o[k] = b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object' ? merge(a[k], b[k]) : b[k]; return o; };
@@ -117,6 +117,7 @@
           ${tgt === 'future' ? `<input type="datetime-local" data-act="date" value="${esc(p.target?.date || '')}" aria-label="Schedule date">` : ''}
           <div class="btns">
             <button data-act="preview">Preview</button>
+            <button data-act="photos">Photos</button>
             ${p.pending?.length ? `<button data-act="gen" ${canGenerate() ? '' : 'disabled title="Image generation is not configured"'}>Generate images</button>` : ''}
             <button class="primary" data-act="publish" ${v.ok ? '' : 'disabled'}>${p.wp?.id ? 'Update' : 'Publish'}</button>
             <button class="ghost danger x" data-act="remove" aria-label="Remove ${esc(p.title)}">×</button>
@@ -129,6 +130,7 @@
     const b = e.target.closest('button[data-act]'); if (!b) return;
     const i = Number(b.closest('.card').dataset.i), p = ws.posts[i]; if (!p) return;
     if (b.dataset.act === 'preview') return preview(p);
+    if (b.dataset.act === 'photos') { pickPhotosFor = [p.post_id]; $('#photoFiles').click(); return; }
     if (b.dataset.act === 'remove') return removePost(i);
     if (busy) return toast('Another job is running. Wait for it to finish.', 'warn');
     busy = true; b.disabled = true;
@@ -209,7 +211,9 @@
     fd.append('wordpress', JSON.stringify(S.wp));
     const { source, validation, pending, wp, target, standard, ...post } = p;
     fd.append('post', JSON.stringify(post));
-    fd.append('options', JSON.stringify({ status: t.status, date: t.date, mode: S.publish.mode, ads: S.ads, adLabel: S.adLabel, adLayout: S.adLayout, existingMedia: wp?.media || {}, wpPostId: wp?.id || null }));
+    const cats = new Set((p.categories || []).map(x => x.toLowerCase()));
+    const related = ws.posts.filter(x => x !== p && x.wp?.link && ['publish'].includes(x.wp.status)).sort((a, b) => ((b.categories || []).some(c => cats.has(c.toLowerCase())) - (a.categories || []).some(c => cats.has(c.toLowerCase()))) || (b.wp.at || 0) - (a.wp.at || 0)).slice(0, 3).map(x => ({ title: x.title, link: x.wp.link }));
+    fd.append('options', JSON.stringify({ related, selfLink: wp?.link || '', status: t.status, date: t.date, mode: S.publish.mode, ads: S.ads, adLabel: S.adLabel, adLayout: S.adLayout, existingMedia: wp?.media || {}, wpPostId: wp?.id || null }));
     const reuse = new Set(Object.keys(wp?.media || {}).map(lc));
     for (const img of images(p)) {
       if (reuse.has(lc(img.filename))) continue;
@@ -290,7 +294,9 @@
       const hero = p.featured_image ? await imgTag(p.featured_image, 'hero') : '';
       const st = p.standard?.stats || {}, pl = j.placements || {};
       $('#previewMeta').textContent = `${st.words || 0} words · ${st.minutes || 0} min · ${st.images || 0} photos · ads: ${pl.top || 0} top, ${pl.side || 0} side, ${pl.inline || 0} in-content, ${pl.textLinks || 0} links${pl.end ? ', resources list' : ''}`;
-      $('#previewBody').innerHTML = `<h1>${esc(p.title)}</h1>${hero}<div class="wp-preview">${html}</div>`;
+      let host = 'yoursite.com'; try { host = new URL(S.wp.url).hostname; } catch {}
+      const serp = `<div class="serp"><small>Google preview</small><cite>${esc(host)} › ${esc(p.slug || '')}</cite><b>${esc(p.meta_title || p.title)}</b><p>${esc(p.meta_description || p.excerpt || '')}</p><small>Focus keyphrase: ${esc(p.focus_keyphrase || p.primary_keyword || '—')} · Excerpt: ${esc(p.excerpt || '—')}</small></div>`;
+      $('#previewBody').innerHTML = `${serp}<h1>${esc(p.title)}</h1>${hero}<div class="wp-preview">${html}</div>`;
       $('#preview').showModal();
       return;
     } catch (e) { log(`Exact preview unavailable (${e.message}); showing a simple preview.`, 'warn'); }
@@ -333,6 +339,7 @@
       for (const a of j.assets || []) await assetPut(a);
       const byId = new Map(ws.posts.map((p, i) => [p.post_id, i]));
       rememberSigs(j.posts);
+      ws.lastBatch = j.posts.map(p => p.post_id);
       for (const n of j.rejectedImages || []) await assetDel(n).catch(() => {}); // never keep drawn placeholders
       for (const p of j.posts) { const at = byId.get(p.post_id); if (at != null) { p.wp = ws.posts[at].wp; p.target = ws.posts[at].target; ws.posts[at] = p; } else ws.posts.push(p); }
       await refreshPending(); render();
@@ -349,6 +356,75 @@
   drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
   drop.ondragleave = () => drop.classList.remove('drag');
   drop.ondrop = e => { e.preventDefault(); drop.classList.remove('drag'); importFiles(e.dataTransfer.files); };
+
+  // ---------- ChatGPT photos: order-matched, converted to web JPGs, confirmed by the user ----------
+  let pickPhotosFor = null, matchState = null;
+  const slotLabel = (p, img) => img.featured ? 'Featured' : /inline-(\d+)/i.test(img.filename) ? `Inline ${img.filename.match(/inline-(\d+)/i)[1]}` : 'Inline';
+  function photoSlots(ids) {
+    const order = ids?.length ? ids : ws.lastBatch?.length ? ws.lastBatch : ws.posts.map(p => p.post_id);
+    return order.map(id => ws.posts.find(p => p.post_id === id)).filter(Boolean).flatMap(p => images(p).map(img => ({ p, img })));
+  }
+  async function toJpeg(file) {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close?.();
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+    const dataBase64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(blob); });
+    return { name: file.name, mime: 'image/jpeg', dataBase64, size: blob.size, w: c.width, h: c.height, url: URL.createObjectURL(blob), lastModified: file.lastModified };
+  }
+  async function addPhotos(fileList, ids) {
+    const files = [...(fileList || [])].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic)$/i.test(f.name));
+    if (!files.length) return toast('Choose photo files.', 'warn');
+    const slots = photoSlots(ids);
+    if (!slots.length) return toast('Import the ZIP first, then add its photos.', 'warn');
+    $('#photoState').textContent = `Preparing ${files.length} photo${files.length > 1 ? 's' : ''}…`;
+    const photos = [];
+    for (const f of files) {
+      try { const ph = await toJpeg(f); ph.drawn = await isPlaceholder(ph); photos.push(ph); }
+      catch { toast(`Could not read ${f.name}. On iPhone, share it as JPG or PNG.`, 'bad'); }
+    }
+    // exact filename matches first, then the rest in the order they were saved
+    const have = new Set((await assetKeys()).map(lc));
+    const byName = new Map(photos.map((ph, k) => [lc(ph.name).replace(/\.(png|webp|jpeg)$/i, '.jpg'), k]));
+    const assign = new Map(), usedPh = new Set();
+    slots.forEach((sl, si) => { const k = byName.get(lc(sl.img.filename)); if (k != null && !photos[k].drawn) { assign.set(si, k); usedPh.add(k); } });
+    const rest = photos.map((ph, k) => k).filter(k => !usedPh.has(k) && !photos[k].drawn).sort((a, b) => (photos[a].lastModified - photos[b].lastModified) || photos[a].name.localeCompare(photos[b].name, undefined, { numeric: true }));
+    const open = slots.map((sl, si) => si).filter(si => !assign.has(si) && !have.has(lc(slots[si].img.filename)));
+    const fill = open.length >= rest.length ? open : slots.map((_, si) => si).filter(si => !assign.has(si));
+    rest.forEach((k, n) => { if (fill[n] != null) assign.set(fill[n], k); });
+    const drawn = photos.filter(ph => ph.drawn).length;
+    matchState = { slots, photos, assign };
+    renderMatcher();
+    $('#matchMeta').textContent = `${assign.size} of ${slots.length} spots matched${drawn ? ` · ${drawn} drawn placeholder${drawn > 1 ? 's' : ''} skipped` : ''}`;
+    $('#photoState').textContent = '';
+    $('#matcher').showModal();
+  }
+  function renderMatcher() {
+    const { slots, photos, assign } = matchState;
+    $('#matchList').innerHTML = slots.map((sl, si) => {
+      const k = assign.get(si), ph = k != null ? photos[k] : null;
+      return `<div class="mrow"><div class="mthumb">${ph ? `<img src="${ph.url}" alt="">` : '<span>Empty</span>'}</div>
+        <div class="minfo"><b>${esc(sl.p.title)}</b><small>${slotLabel(sl.p, sl.img)} · ${esc(sl.img.filename)}</small><small class="muted">${esc(sl.img.alt_text || sl.img.art?.scene || '')}</small>
+        <select data-si="${si}" aria-label="Photo for ${esc(sl.img.filename)}"><option value="">— keep current / generate —</option>${photos.map((p2, pk) => p2.drawn ? '' : `<option value="${pk}" ${pk === k ? 'selected' : ''}>Photo ${pk + 1} · ${esc(p2.name.slice(0, 32))}</option>`).join('')}</select></div></div>`;
+    }).join('');
+  }
+  $('#matchList').addEventListener('change', e => { const sel = e.target.closest('select[data-si]'); if (!sel) return; const si = Number(sel.dataset.si); if (sel.value === '') matchState.assign.delete(si); else matchState.assign.set(si, Number(sel.value)); renderMatcher(); });
+  $('#closeMatch').onclick = () => { matchState?.photos.forEach(ph => URL.revokeObjectURL(ph.url)); matchState = null; $('#matcher').close(); };
+  $('#saveMatch').onclick = async () => {
+    const { slots, photos, assign } = matchState; let n = 0;
+    for (const [si, k] of assign) { const ph = photos[k], sl = slots[si]; await assetPut({ name: sl.img.filename, mime: 'image/jpeg', dataBase64: ph.dataBase64, size: ph.size }); if (sl.p.wp?.media) delete sl.p.wp.media[sl.img.filename]; n++; }
+    photos.forEach(ph => URL.revokeObjectURL(ph.url)); matchState = null; $('#matcher').close();
+    await refreshPending(); saveWs(); render();
+    const left = ws.posts.reduce((t, p) => t + (p.pending?.length || 0), 0);
+    toast(`${n} photo${n === 1 ? '' : 's'} saved.${left ? ` ${left} still missing (Aura can generate them).` : ''}`, 'ok', 6000); log(`Added ${n} ChatGPT photos`, 'ok');
+    $('#photoState').textContent = `${n} photos added · ${left} still missing`;
+  };
+  $('#photoFiles').onchange = async () => { const f = $('#photoFiles').files, ids = pickPhotosFor; pickPhotosFor = null; await addPhotos(f, ids); $('#photoFiles').value = ''; };
+  const pdrop = $('#photoDrop');
+  pdrop.ondragover = e => { e.preventDefault(); pdrop.classList.add('drag'); };
+  pdrop.ondragleave = () => pdrop.classList.remove('drag');
+  pdrop.ondrop = e => { e.preventDefault(); pdrop.classList.remove('drag'); addPhotos(e.dataTransfer.files); };
 
   // ---------- standard & ads ----------
   function fillStandard() {

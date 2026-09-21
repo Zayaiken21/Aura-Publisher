@@ -241,4 +241,26 @@ fieldset.places label.check{margin:0}
 .wp-preview a[rel~="sponsored"]{text-decoration:underline;text-decoration-color:#0d64bc66;text-underline-offset:3px}
 .wp-preview::after{content:"";display:block;clear:both}
 @media (max-width:760px){.grid3{grid-template-columns:1fr 1fr}}
+
+/* ---------- V11.3: photo matcher, SERP preview ---------- */
+#matcher{width:min(760px,96vw);background:var(--deep);color:var(--text);border:1px solid var(--line2)}
+#matcher .dlg-head{background:#0b2344}
+.matchbody{padding:14px 18px 18px;max-height:78vh;overflow:auto}
+.matchlist{display:grid;gap:10px;margin:10px 0 14px}
+.mrow{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:var(--r-md);background:#051428}
+.mthumb{aspect-ratio:3/2;border-radius:8px;overflow:hidden;background:#0a2240;display:grid;place-items:center;color:var(--muted);font-size:12px}
+.mthumb img{width:100%;height:100%;object-fit:cover}
+.minfo{display:flex;flex-direction:column;gap:3px;min-width:0}
+.minfo b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.minfo small{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.minfo select{margin-top:4px}
+.serp{margin:18px 0 6px;padding:14px 16px;border:1px solid #e3e8ef;border-radius:12px;background:#fff;font:14px/1.45 Arial,sans-serif}
+.serp>small:first-child{display:block;color:#667085;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.serp cite{display:block;color:#202124;font-style:normal;font-size:12.5px}
+.serp b{display:block;color:#1a0dab;font-size:19px;font-weight:400;margin:2px 0}
+.serp p{margin:0 0 6px;color:#4d5156}
+.serp>small:last-child{color:#667085;font-size:12px}
+ol.steps{margin:10px 0 4px;padding-left:1.3em}ol.steps li{margin:.4em 0;color:var(--muted)}ol.steps b{color:var(--text)}
+.wp-preview details summary{list-style:revert}
+@media (max-width:760px){.mrow{grid-template-columns:92px 1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
