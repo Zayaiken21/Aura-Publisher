@@ -64,7 +64,7 @@
     strength,
     list() { return Object.values(load().users).map(u => ({ uid: uidOf(u.username), username: u.username, createdAt: u.createdAt })); },
     exists(username) { return !!load().users[uidOf(username)]; },
-    current() { return session ? { uid: session.uid, username: session.username } : null; },
+    current() { return session ? { uid: session.uid, username: session.username, hasRecovery: !!load().users[session.uid]?.rec } : null; },
     settings() { return session ? structuredClone(session.settings) : null; },
 
     async create(username, password, settings) {
@@ -73,10 +73,12 @@
       const db = load();
       if (db.users[uid]) throw new Error('That username already exists on this device. Unlock it or choose another name.');
       const st = strength(password, username); if (!st.ok) throw new Error('Password needs ' + st.issues.join(', ') + '.');
+      // The WordPress connection is optional at sign-up. Without it there is no recovery key
+      // until the user adds one in Connections (save() creates it then).
       const recovery = normRecovery(settings?.wp?.appPassword);
-      if (recovery.length < 16) throw new Error('Enter your WordPress Application Password. It is your recovery key for password resets.');
+      if (recovery && recovery.length < 16) throw new Error('That Application Password looks too short. It should be 24 characters (spaces are fine), or leave it empty and add it later.');
       const dek = rand(32);
-      db.users[uid] = { v: 1, username: String(username).trim(), createdAt: Date.now(), pw: await wrap(password, dek, uid, 'pw'), rec: await wrap(recovery, dek, uid, 'rec'), fails: { n: 0, until: 0 } };
+      db.users[uid] = { v: 1, username: String(username).trim(), createdAt: Date.now(), pw: await wrap(password, dek, uid, 'pw'), rec: recovery ? await wrap(recovery, dek, uid, 'rec') : null, fails: { n: 0, until: 0 } };
       const key = await dekKey(dek);
       await writeVault(db, uid, key, settings);
       session = { uid, username: db.users[uid].username, dek, key, settings: structuredClone(settings) };
@@ -119,6 +121,7 @@
     async recover(username, appPassword, next) {
       const uid = uidOf(username), db = load(), rec = db.users[uid];
       if (!rec) throw new Error('No account with that username on this device.');
+      if (!rec.rec) throw new Error('This account has no WordPress Application Password saved yet, so it has no recovery key. Without the Aura password it cannot be reset — delete it and create a new one.');
       checkLock(rec);
       let dek;
       try { dek = await unwrap(normRecovery(appPassword), rec.rec, uid, 'rec'); }

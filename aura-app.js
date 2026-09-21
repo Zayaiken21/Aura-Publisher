@@ -79,7 +79,7 @@
   // ---------- render queue ----------
   const statusLabel = { publish: 'Published', future: 'Scheduled', draft: 'Draft', pending: 'Pending review', private: 'Private' };
   function render() {
-    const ps = ws.posts;
+    const ps = ws.posts; updateDetails();
     $('#sTotal').textContent = ps.length;
     $('#sReady').textContent = ps.filter(p => p.validation?.ok).length;
     $('#sPending').textContent = ps.reduce((t, p) => t + (p.pending?.length || 0), 0);
@@ -119,7 +119,6 @@
     }).join('');
   }
   $('#list').addEventListener('click', async e => {
-    const go = e.target.closest('[data-go]'); if (go) return switchTab(go.dataset.go);
     const b = e.target.closest('button[data-act]'); if (!b) return;
     const i = Number(b.closest('.card').dataset.i), p = ws.posts[i]; if (!p) return;
     if (b.dataset.act === 'preview') return preview(p);
@@ -185,7 +184,7 @@
 
   // ---------- publishing ----------
   async function publish(p, n) {
-    if (!S.wp.url || !S.wp.username || !S.wp.appPassword) { switchTab('settings'); throw new Error('Add your WordPress connection first.'); }
+    if (!hasWp()) { switchTab('settings'); throw new Error('Add your WordPress connection in Connections before publishing. Everything else works without it.'); }
     await refreshPending();
     if (p.pending?.length) {
       if (canGenerate() && S.standard.autoGenerate) await generateFor(p);
@@ -343,11 +342,11 @@
   $('#saveAds').onclick = async () => {
     const ads = readAds(); const bad = ads.find(a => a.url && !/^https?:\/\//i.test(a.url));
     if (bad) return toast(`Ad link must start with https:// (${bad.url})`, 'bad');
-    S.ads = ads; S.adLabel = $('#adLabel').value.trim() || 'Sponsored'; await V.save(S); buildPrompt(); toast('Ads saved. They fill every empty ad slot.', 'ok');
+    S.ads = ads; S.adLabel = $('#adLabel').value.trim() || 'Sponsored'; await V.save(S); buildPrompt(); updateDetails(); toast('Ads saved. They fill every empty ad slot.', 'ok');
   };
   $('#saveStandard').onclick = async () => {
     Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
-    await V.save(S); toast('Standard saved.', 'ok');
+    await V.save(S); updateDetails(); toast('Standard saved.', 'ok');
   };
   $('#reapply').onclick = async () => {
     if (!ws.posts.length) return toast('The queue is empty.', 'warn');
@@ -380,7 +379,9 @@
   $('#saveWp').onclick = async () => {
     const w = wpForm();
     if (!w.url || !w.username || w.appPassword.replace(/\s/g, '').length < 16) return toast('Fill in all three WordPress fields.', 'warn');
-    S.wp = w; S.publish.mode = $('#wpMode').value; await V.save(S); toast('WordPress connection saved to your account.', 'ok');
+    const hadRec = V.current()?.hasRecovery;
+    S.wp = w; S.publish.mode = $('#wpMode').value; await V.save(S); updateDetails();
+    toast(hadRec ? 'WordPress connection saved to your account.' : 'WordPress connection saved. Password reset is now turned on with this Application Password.', 'ok');
   };
   $('#saveOa').onclick = async () => { S.openaiKey = $('#oaKey').value.trim(); await V.save(S); await refreshPending(); render(); genState(); toast('Saved.', 'ok'); };
   function genState() { $('#genState').textContent = health.features?.imageGeneration ? `The engine generates images with ${health.features.imageModel}. No key needed here.` : S?.openaiKey ? 'Using your OpenAI key for image generation.' : health.online ? 'The engine has no OpenAI key. Add yours below, or set OPENAI_API_KEY on Render.' : 'Engine offline.'; }
@@ -404,8 +405,30 @@
   };
 
   // ---------- tabs ----------
-  function switchTab(id) { $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === id)); $$('.tab').forEach(t => t.classList.toggle('on', t.id === id)); window.scrollTo({ top: 0 }); }
+  function switchTab(id) {
+    $$('.tabs button').forEach(b => { const on = b.dataset.tab === id; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); if (on) b.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); });
+    $$('.tab').forEach(t => t.classList.toggle('on', t.id === id)); window.scrollTo({ top: 0 });
+  }
   $$('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+  document.addEventListener('click', e => { const go = e.target.closest('[data-go]'); if (go && S) { e.preventDefault(); switchTab(go.dataset.go); } });
+
+  // Live detail lines under each menu bubble + the "not connected" banner.
+  const hasWp = () => !!(S?.wp?.url && S.wp.username && S.wp.appPassword);
+  function updateDetails() {
+    if (!S) return;
+    const ps = ws.posts, ready = ps.filter(p => p.validation?.ok).length, live = ps.filter(p => p.wp?.id).length;
+    $('#tdQueue').textContent = ps.length ? `${ps.length} post${ps.length > 1 ? 's' : ''} · ${ready} ready${live ? ` · ${live} live` : ''}` : 'No posts yet';
+    const ads = (S.ads || []).filter(a => a.enabled !== false && (a.url || a.html)).length;
+    $('#tdStandard').textContent = `${ads} ad${ads === 1 ? '' : 's'} · ${S.standard.enforce ? 'standard on' : 'standard off'}`;
+    $('#tdPrompt').textContent = `${S.prompt.count || 5} posts per package`;
+    let host = ''; try { host = hasWp() ? new URL(S.wp.url).hostname : ''; } catch { host = S.wp.url; }
+    $('#tdConn').textContent = hasWp() ? host : 'WordPress not added';
+    $('#tdConn').classList.toggle('warn', !hasWp());
+    const rec = V.current()?.hasRecovery;
+    $('#tdAcct').textContent = `${V.current()?.username} · ${rec ? 'reset key saved' : 'no reset key yet'}`;
+    $('#tdAcct').classList.toggle('warn', !rec);
+    $('#wpBanner').hidden = hasWp();
+  }
 
   // ---------- lock screen ----------
   function lockTab(id) { $$('[data-lock]').forEach(b => b.classList.toggle('on', b.dataset.lock === id)); $$('.lockform').forEach(f => f.classList.toggle('on', f.id === 'f' + id[0].toUpperCase() + id.slice(1))); }
@@ -426,17 +449,22 @@
     const st = V.strength($('#cPass').value, $('#cUser').value); if (!st.ok) return setMsg(m, 'Password needs ' + st.issues.join(', ') + '.');
     if (V.exists($('#cUser').value)) return setMsg(m, 'That username already exists on this device.');
     const w = { url: $('#cUrl').value.trim(), username: $('#cWpUser').value.trim(), appPassword: $('#cWpPass').value.trim() };
-    setMsg(m, 'Checking your WordPress login…', 'muted');
-    try { const j = await testWp(w); w.url = j.site || w.url; setMsg(m, `WordPress verified as ${j.user?.name}. Encrypting your account…`, 'ok'); }
-    catch (err) {
-      if (err.status) return setMsg(m, err.message); // WordPress said no: the recovery key must be correct
-      if (!confirm('Aura Engine is not reachable right now, so your WordPress login could not be verified. Create the account anyway? (Your Application Password becomes your recovery key, so make sure it is correct.)')) return setMsg(m, 'Not created. Try again when the engine is online.');
-    }
+    const filled = [w.url, w.username, w.appPassword].filter(Boolean).length;
+    if (filled && filled < 3) return setMsg(m, 'Fill in all three WordPress fields, or leave all three empty and add them later in Connections.');
+    if (filled) {
+      // Only contact the engine when there is a connection to verify, so skipping it costs no requests.
+      setMsg(m, 'Checking your WordPress login…', 'muted');
+      try { const j = await testWp(w); w.url = j.site || w.url; setMsg(m, `WordPress verified as ${j.user?.name}. Encrypting your account…`, 'ok'); }
+      catch (err) {
+        if (err.status) return setMsg(m, err.message); // WordPress said no: the recovery key must be correct
+        if (!confirm('Aura Engine is not reachable right now, so your WordPress login could not be verified. Create the account anyway? (Your Application Password becomes your recovery key, so make sure it is correct.)')) return setMsg(m, 'Not created. Try again when the engine is online.');
+      }
+    } else if (!confirm('Create the account without WordPress for now?\n\nYou can import, preview and generate images right away. Until you add your Application Password in Connections, a forgotten Aura password cannot be reset.')) return setMsg(m, '', 'muted');
     try {
       const settings = merge(DEFAULTS, { wp: w });
       await V.create($('#cUser').value, $('#cPass').value, settings);
       $('#cPass').value = $('#cPass2').value = $('#cWpPass').value = ''; setMsg(m, '');
-      enterApp(); toast('Account created. Your WordPress login is saved and encrypted.', 'ok');
+      enterApp(); toast(filled ? 'Account created. Your WordPress login is saved and encrypted.' : 'Account created. Add WordPress in Connections whenever you are ready.', 'ok');
     } catch (err) { setMsg(m, err.message); }
   };
   $('#fReset').onsubmit = async e => {
@@ -483,7 +511,7 @@
     if ($('#preview').open) $('#preview').close();
     refreshUsers(); lockTab(V.list().length ? 'unlock' : 'create');
   }
-  $('#lockBtn').onclick = lockUi;
+  $('#signOutBtn').onclick = $('#signOut2').onclick = () => { lockUi(); toast('Signed out.'); };
 
   // ---------- engine health ----------
   async function wake() {

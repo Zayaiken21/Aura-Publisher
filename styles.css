@@ -6,13 +6,17 @@
   --display:"Sora",system-ui,sans-serif;--body:"Figtree",system-ui,sans-serif;
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;min-height:100vh;color:var(--text);font:15px/1.55 var(--body);background:radial-gradient(1200px 700px at 50% -10%,#0a3c8f 0,#04224f 30%,var(--ink) 68%,#000 100%) fixed;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+html{-webkit-text-size-adjust:100%;overflow-x:hidden;overflow-x:clip;overscroll-behavior-x:none;background:var(--ink)}
+body{margin:0;min-height:100vh;min-height:100dvh;color:var(--text);font:15px/1.55 var(--body);background:var(--ink);padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow-x:hidden;overflow-x:clip;overscroll-behavior-x:none}
 [hidden]{display:none!important}
 a{color:var(--volt)}
 .bg-cross{position:fixed;inset:6% 0 auto;text-align:center;font-size:min(56vw,640px);line-height:1;color:var(--gold);opacity:.05;filter:drop-shadow(0 0 40px #ffd96688);pointer-events:none;z-index:0}
 .bolt{position:fixed;color:var(--volt);opacity:.1;font-size:36vw;line-height:1;filter:drop-shadow(0 0 24px #1e90ff);pointer-events:none;z-index:0}
 .b1{left:-5%;top:6%;transform:rotate(-12deg)}.b2{right:-2%;bottom:-12%;transform:rotate(18deg)}
+
+/* fixed background layer, clipped so the big glyphs can never widen the page */
+.fx{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;background:radial-gradient(1200px 700px at 50% -10%,#0a3c8f 0,#04224f 30%,var(--ink) 68%,#000 100%)}
+.fx .bg-cross,.fx .bolt{position:absolute}
 
 /* brand */
 .brand{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em;display:flex;align-items:baseline;gap:8px}
@@ -171,5 +175,45 @@ dialog::backdrop{background:#000c}
   .toolbar .grow{display:none}
   .article{padding:6px 18px 30px}
   .flow li{margin-right:14px}.flow li:not(:last-child)::after{right:-15px;width:14px}
+}
+/* ---------- V11.1: menu bubbles ---------- */
+.tabs{position:sticky;top:0;z-index:20;gap:10px;margin:8px -22px 18px;padding:10px 22px 12px;scroll-snap-type:x proximity;scroll-padding-inline:22px;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;background:linear-gradient(#020a18f0 70%,#020a1800);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);mask-image:linear-gradient(90deg,transparent 0,#000 16px,#000 calc(100% - 16px),transparent)}
+.tabs button{flex:0 0 auto;scroll-snap-align:start;display:flex;align-items:center;gap:10px;min-width:150px;padding:10px 16px 10px 10px;border-radius:999px;border:1px solid #1d4270aa;background:linear-gradient(145deg,#0c2a52cc,#071a33cc);box-shadow:0 1px 0 #ffffff0d inset,0 6px 18px #0006;color:var(--muted);text-align:left;transition:background .2s,border-color .2s,transform .15s}
+.tabs button:active{transform:scale(.97)}
+.tabs button i{font-style:normal;display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#0a2446;font-size:17px}
+.tabs button span{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.tabs button b{font:600 14px var(--display);color:var(--text)}
+.tabs button small{font-size:11.5px;color:var(--muted);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs button small.warn{color:var(--warn)}
+.tabs button.on{background:linear-gradient(145deg,#1560b8,#0b3b78);border-color:#4fb0ff88;box-shadow:0 0 0 1px #3aa8ff33,0 8px 26px #0d64bc55}
+.tabs button.on i{background:#ffffff22}
+.tabs button.on small{color:#cfe6ff}
+
+/* not-connected banner */
+.banner{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border:1px solid #7a5520;border-radius:var(--r-md);background:#2a1c0799;color:#ffe2b8;font-size:14px}
+.opt{font:500 11px var(--body);color:var(--muted);border:1px solid var(--line2);border-radius:99px;padding:1px 8px;margin-left:6px;vertical-align:middle}
+
+/* long words and URLs wrap instead of pushing the page sideways */
+.panel,.card,.toast,.msg,.hint,.muted,#log li{overflow-wrap:anywhere;min-width:0}
+img,video,svg{max-width:100%}
+textarea{max-width:100%}
+pre,table{max-width:100%;overflow-x:auto}
+
+@media (max-width:760px){
+  /* 16px inputs stop iPhone from zooming in on focus (the main cause of the page drifting) */
+  input,select,textarea{font-size:16px}
+  body{touch-action:manipulation}
+  .tabs{margin:4px -14px 14px;padding:8px 14px 10px;scroll-padding-inline:14px}
+  .tabs button{min-width:136px;padding:8px 14px 8px 8px}
+  .tabs button i{width:30px;height:30px;flex-basis:30px;font-size:15px}
+  .top{flex-wrap:nowrap}.top .brand .sub{display:none}
+  .top-r{gap:6px;min-width:0}.top-r .pill{font-size:11px;padding:5px 9px;white-space:nowrap}
+  .who{display:none}
+  .top-r button{white-space:nowrap;padding:7px 12px}
+  .lock{padding:16px 12px;place-items:start center}
+  .lock-card{padding:24px 18px}
+  .seg button{font-size:12.5px;padding:9px 4px}
+  .b1,.b2{font-size:60vw}
+  dialog{max-width:100vw}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

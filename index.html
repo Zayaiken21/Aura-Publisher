@@ -7,10 +7,10 @@
 <title>Aura Publisher Pro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=11.0.0">
+<link rel="stylesheet" href="styles.css?v=11.1.0">
 </head>
 <body>
-<div class="bg-cross" aria-hidden="true">✝</div><div class="bolt b1" aria-hidden="true">ϟ</div><div class="bolt b2" aria-hidden="true">ϟ</div>
+<div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
 
 <!-- ============ LOCK SCREEN ============ -->
 <section id="lock" class="lock">
@@ -36,13 +36,14 @@
       <div class="meter" aria-hidden="true"><i id="cMeter"></i></div><p class="hint" id="cHint">12+ characters with 3 of: lowercase, uppercase, number, symbol.</p>
       <label>Confirm password<input id="cPass2" type="password" autocomplete="new-password" required></label>
       <fieldset>
-        <legend>WordPress account</legend>
-        <label>Site URL<input id="cUrl" placeholder="https://yoursite.com" required></label>
-        <label>WordPress username<input id="cWpUser" autocomplete="off" required></label>
-        <label>Application Password<span class="pw"><input id="cWpPass" type="password" autocomplete="off" required><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
-        <p class="hint">Create one in WordPress under Users → Profile → Application Passwords. It is also your recovery key: it's the only way to reset your Aura password later.</p>
+        <legend>WordPress connection <span class="opt">optional</span></legend>
+        <p class="hint">Don't have it yet? Leave these empty and add them later in Connections.</p>
+        <label>Site URL<input id="cUrl" placeholder="https://yoursite.com" inputmode="url" autocapitalize="off"></label>
+        <label>WordPress username<input id="cWpUser" autocomplete="off" autocapitalize="off"></label>
+        <label>Application Password<span class="pw"><input id="cWpPass" type="password" autocomplete="off"><button type="button" class="eye" aria-label="Show password">Show</button></span></label>
+        <p class="hint">Create one in WordPress under Users → Profile → Application Passwords. It is also your recovery key: until it's saved, a forgotten Aura password can't be reset.</p>
       </fieldset>
-      <button class="primary wide">Verify and create account</button>
+      <button class="primary wide" id="cBtn">Create account</button>
       <p class="msg" id="cMsg" role="status"></p>
     </form>
 
@@ -66,21 +67,22 @@
 <div id="app" hidden>
   <header class="top">
     <div class="brand"><span class="mark">⚡</span>Aura<span class="sub">Publisher Pro</span></div>
-    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="lockBtn" class="ghost sm">Lock</button></div>
+    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm">Sign out</button></div>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button data-tab="queue" class="on">Queue</button>
-    <button data-tab="import">Import</button>
-    <button data-tab="standard">Standard &amp; ads</button>
-    <button data-tab="prompt">ChatGPT prompt</button>
-    <button data-tab="settings">Connections</button>
-    <button data-tab="account">Account</button>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button data-tab="queue" class="on"><i>📋</i><span><b>Queue</b><small id="tdQueue">No posts yet</small></span></button>
+    <button data-tab="import"><i>📦</i><span><b>Import</b><small>ZIP, JSON, DOCX, PDF</small></span></button>
+    <button data-tab="standard"><i>🧭</i><span><b>Standard &amp; ads</b><small id="tdStandard">Layout, alt text, ads</small></span></button>
+    <button data-tab="prompt"><i>✨</i><span><b>ChatGPT prompt</b><small id="tdPrompt">Build post packages</small></span></button>
+    <button data-tab="settings"><i>🔗</i><span><b>Connections</b><small id="tdConn">WordPress not added</small></span></button>
+    <button data-tab="account"><i>🔐</i><span><b>Account</b><small id="tdAcct">Password, backup</small></span></button>
   </nav>
 
   <main>
     <!-- QUEUE -->
     <section id="queue" class="tab on">
+      <div class="banner" id="wpBanner" hidden><span><b>WordPress isn't connected yet.</b> You can import, preview and generate images now. Add your connection to publish and to turn on password reset.</span><button class="primary sm" data-go="settings">Add connection</button></div>
       <div class="stats">
         <div><b id="sTotal">0</b><span>posts</span></div>
         <div><b id="sReady">0</b><span>ready</span></div>
@@ -223,6 +225,9 @@
           <h2 class="mt danger-t">Delete account</h2>
           <p class="muted">Removes this account, its queue and its stored images from this device. WordPress is not touched.</p>
           <button id="deleteAcct" class="ghost danger">Delete this account</button>
+          <h2 class="mt">Sign out</h2>
+          <p class="muted">Locks your account and returns to the sign-in screen. Your queue and settings stay saved and encrypted.</p>
+          <button id="signOut2">Sign out</button>
         </div>
       </div>
     </section>
@@ -232,9 +237,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=11.0.0"></script>
-<script src="aura-vault.js?v=11.0.0"></script>
-<script src="aura-prompt.js?v=11.0.0"></script>
-<script src="aura-app.js?v=11.0.0"></script>
+<script src="config.js?v=11.1.0"></script>
+<script src="aura-vault.js?v=11.1.0"></script>
+<script src="aura-prompt.js?v=11.1.0"></script>
+<script src="aura-app.js?v=11.1.0"></script>
 </body>
 </html>
