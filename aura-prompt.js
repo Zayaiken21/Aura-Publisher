@@ -1,4 +1,4 @@
-// Aura ChatGPT Package Prompt V4 — builds batched prompts that make ChatGPT produce Aura-ready ZIP packages.
+// Aura ChatGPT Package Prompt V5 — one ZIP with everything — builds batched prompts that make ChatGPT produce Aura-ready ZIP packages.
 // Unlimited post lists are split into batches ChatGPT can finish in one reply (no truncated JSON, no rate limits).
 (() => {
   const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -49,22 +49,23 @@ ${lib.map(a => `| ${adId(a)} | ${clean(a.label || a.name)}${a.text ? ` — ${cle
     const code = `${today}-b${String(n.batchNo).padStart(2, '0')}`;
     const firstNo = bi * pl.size + 1;
     const photos = n.count * 3;
-    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v4) — BATCH ${n.batchNo} OF ${n.batches}
+    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v5) — BATCH ${n.batchNo} OF ${n.batches}
 
-You are a senior editor, SEO strategist, affiliate-content specialist and photo director. You produce finished, publish-ready blog posts and their real photographs for Aura Publisher, which imports your package, places the affiliate links and ads, and publishes every post live to WordPress. Write articles a reader would happily share and Google would want to rank.
+You are a senior editor, SEO strategist, affiliate-content specialist and photo director. You produce finished, publish-ready blog posts and detailed photo briefs for Aura Publisher, which imports your ONE ZIP, creates the photos, places the affiliate links and ads, completes the SEO and publishes every post live to WordPress. Write articles a reader would happily share and Google would want to rank.
 
-## 0. How to deliver (follow exactly — this keeps you inside your reply and image limits)
-**Reply 1 — the package.** Create **aura-package-${code}.zip** containing only \`aura-posts.json\` (no images folder). Give me the download link, then a numbered **Photo list** with one line per photo: \`Photo X of ${photos} — <filename> — <post title> — <where it goes>\`. Order: post 1 featured, post 1 inline-1, post 1 inline-2, then post 2, and so on.
-**Then the photos, one per reply.** Generate **Photo 1** with your built-in image generation tool from its "prompt" field, as a real photorealistic photograph (landscape 3:2). Under the image write only \`Photo 1 of ${photos} — <filename>\`. Then stop. Each time I reply "next", generate the next photo the same way until Photo ${photos} is done.
-**Never draw, paint or code an image** (no Python/PIL, matplotlib, SVG, canvas, shapes or placeholder art), and never put drawn images in the ZIP. If image generation is unavailable or you hit a limit, say "Photo X paused — limit reached" and wait; I will say "next" later. Do not substitute anything.
-If the package would not fit in one reply, finish the current post, close the JSON validly, deliver the ZIP with the posts completed so far, and say which posts remain.
+## 0. What you deliver — ONE complete ZIP
+Create **aura-package-${code}.zip** containing:
+- \`aura-posts.json\` — every post, fully written, with all SEO fields and a detailed brief for every photo (sections 3–9)
+- \`images/\` — ONLY real photographs you generated with your image generation tool and can save as files, named exactly as in the manifest. **Never draw, paint or code an image** (no Python/PIL, matplotlib, SVG, canvas, shapes or placeholder art). If your image tool cannot save files into the ZIP, leave \`images/\` out — Aura generates every photo from your briefs with the same image model, including the title on the cover.
+Give me the download link and one line per post: title — category — format_variant — word count — affiliate IDs used. Nothing else.
+If the whole batch will not fit in one reply, finish the current post, close the JSON validly, deliver the ZIP with the finished posts and list the remaining ones.
 
 ## 1. Brief
 ${line('Site / brand', cfg.siteName, 'a warm, trustworthy lifestyle-and-wellbeing brand')}
 ${line('Niche', cfg.niche, 'mindful living, personal growth and practical wellbeing')}
 ${line('Audience', cfg.audience, 'busy adults who want calm, practical, faith-friendly guidance without hype')}
 ${line('Voice', cfg.voice, 'warm, clear, grounded, encouraging; short paragraphs; second person ("you")')}
-${clean(cfg.extra) ? `- Information and rules for EVERY post: ${clean(cfg.extra)}\n` : ''}- This batch: ${n.count} post${n.count > 1 ? 's' : ''} (batch ${n.batchNo} of ${n.batches}; posts ${firstNo}–${firstNo + n.count - 1} of ${pl.total}) · ${photos} photos
+${clean(cfg.extra) ? `- Information and rules for EVERY post: ${clean(cfg.extra)}\n` : ''}- This batch: ${n.count} post${n.count > 1 ? 's' : ''} (batch ${n.batchNo} of ${n.batches}; posts ${firstNo}–${firstNo + n.count - 1} of ${pl.total}) 
 - Package code: ${code}
 
 ## 2. Posts in this batch
@@ -109,20 +110,25 @@ Rules:
 - **Featured IDs:** when a post in section 2 lists affiliate IDs, feature each at least once in that post.
 - If nothing fits a section, write "ad_id": "" — Aura picks the most relevant one. Never force an irrelevant product. Aura adds labels, banner, side cards, resources list and disclosure itself; do not write disclosures.
 
-## 7. Photos — real people, real connection, matched to their exact spot
-Every post has **1 featured photo + 2 inline photos**. **Every photo shows real people sharing a genuine human moment** — a parent guiding a child's hands, friends laughing over a task, neighbours helping each other, a couple proud of what they made. Real emotion on faces and in hands: relief, pride, encouragement, joy, calm focus. No empty rooms, no product-only shots, no stock smiles at the camera. Each inline photo acts out the specific idea of the section it sits in.
+## 7. Photos — detailed briefs Aura turns into real photographs
+Every post has **1 featured cover + 2 inline photos**. Your briefs decide how good they are, so make them specific to THIS post's category and title.
 
-**Featured photo = premium magazine cover.** Vibrant, abundant, richly detailed lifestyle scene in warm natural light, layered foreground to background, with the post's short headline in large, bold, hand-painted brush-script lettering integrated into the photo. Put that headline (max 7 words, spelled exactly) in "hero_text". For "vs", "buy vs skip", "mistakes" or before-and-after topics, use a split scene: the bright, hopeful right way on one side (with the people), the darker wrong way on the other.
-**Inline photos = no text at all**, candid and photojournalistic.
+**Featured cover (title in the picture).** A premium magazine / Pinterest-style cover that instantly reads as a {category} article about {title}: a vibrant, abundant, sun-drenched photorealistic scene built from that category's real world (garden → lush beds, soil, harvest; food → a glowing spread of fresh whole foods; money → a warm organised desk; trading → monitors of blurred charts and a notebook of levels; faith → an open Bible in morning light…), with real people sharing a genuine moment in the scene, and the headline in huge hand-painted brush-script lettering on a painted brush-stroke banner.
+- "hero_text": the headline for the image, max 9 words, spelled exactly (usually the title or its main clause)
+- "hero_tagline": a short uppercase-style line under the headline, max 7 words (e.g. "Make better choices for a healthier you")
+- "cover_notes": 3 tiny handwritten details that appear on a chalkboard, note card or notebook in the scene, max 4 words each (e.g. "Real foods", "More energy", "Better health")
+- For "X vs Y", "buy vs skip", "mistakes" or before-and-after titles, describe a split scene: the bright, hopeful right way on the left, the darker wrong way on the right, headline across both halves.
 
-Build a private shot list for the batch first and give every photo a different combination of people + relationship + emotion, action from its section, specific setting (never repeated in the batch), shot (featured wide scene · inline-1 medium candid of two people · inline-2 close-up of hands working together with faces softly in frame), time of day and matching light, lens (24–35mm wide, 50mm, 85mm) and a rich natural palette.
+**Inline photos (no text at all).** Real people sharing a genuine human moment that acts out the exact idea of the section they sit in — a parent guiding a child's hands, friends laughing over a task, neighbours helping each other. Real emotion: relief, pride, encouragement, joy, calm focus. No empty rooms, no product-only shots, no smiles at the camera.
+
+Build a private shot list for the batch first: every photo gets a different combination of people + relationship + emotion, action from its section, specific setting (never repeated in the batch), shot (cover wide scene · inline-1 medium candid of two people · inline-2 close-up of hands working together with faces softly in frame), time of day and matching light, lens and a rich natural palette.
 
 Fields for every photo:
 - "filename": \`<post-slug>-featured.jpg\`, \`<post-slug>-inline-1.jpg\`, \`<post-slug>-inline-2.jpg\`
-- "alt_text": **[Who] [doing what] in [setting]** — 80–125 characters, complete (never cut mid-word), unique; primary keyword only in the featured alt
+- "alt_text": **[Who] [doing what] in [setting]** — 80–125 characters, complete, unique; the featured alt starts with the focus keyphrase
 - "caption": one short human sentence, unique per photo
 - "purpose", "subject" (3–6 words), "concept", "people", "emotion", "shot", "setting", "time_of_day", "lighting", "lens", "palette": short phrases from your shot list
-- "prompt": 90–150 words, a photographer's brief: "Photorealistic, vibrant editorial lifestyle photograph. [shot] of [people] [action] in [setting], [time of day], [lighting]. Human connection: [emotion], candid, not looking at the camera. Shot on a full-frame camera with a [lens]; layered composition with [3 real props] in the foreground. [palette]. [mood]. Natural skin texture, realistic hands with five fingers, true-to-life colour, rich detail. Not an illustration, cartoon, vector or 3D render." Inline prompts add "No text, letters or logos anywhere"; the featured prompt adds "The only text is the headline "[hero_text]", spelled exactly". Landscape 3:2.
+- "prompt": 100–160 words, a photographer's brief: "Photorealistic, vibrant editorial lifestyle photograph. [shot] of [people] [action] in [setting], [time of day], [lighting]. Human connection: [emotion], candid, not looking at the camera. Shot on a full-frame camera with a [lens]; layered composition with [3 real props] in the foreground. [palette]. [mood]. Natural skin texture, realistic hands, true-to-life colour, rich detail. Not an illustration, cartoon, vector or 3D render." Inline prompts add "No text, letters or logos anywhere". Landscape 3:2.
 - Every prompt is written for its own photo. Never reuse a prompt template across posts.
 
 ## 8. SEO fields (every post)
@@ -137,7 +143,7 @@ Fields for every photo:
 ## 9. Exact output — aura-posts.json
 \`\`\`json
 {
-  "protocol": "aura-11.3",
+  "protocol": "aura-12",
   "standard": "Mindful Adaption Standard v4",
   "generated": "${code}",
   "posts": [
@@ -146,7 +152,7 @@ Fields for every photo:
       "title": "…", "slug": "…", "meta_title": "…", "meta_description": "…", "excerpt": "…",
       "focus_keyphrase": "…", "primary_keyword": "…", "secondary_keywords": ["…"],
       "format_variant": "story-led", "categories": ["…"], "tags": ["…"], "status": "publish",
-      "hero_text": "<short headline, max 7 words>",
+      "hero_text": "<headline for the cover, max 9 words>", "hero_tagline": "<max 7 words>", "cover_notes": ["…", "…", "…"],
       "featured_image": {"filename": "<slug>-featured.jpg", "alt_text": "…", "caption": "…", "purpose": "Featured image", "subject": "…", "concept": "…", "people": "…", "emotion": "…", "shot": "…", "setting": "…", "time_of_day": "…", "lighting": "…", "lens": "…", "palette": "…", "prompt": "…"},
       "sections": [
         {"type": "intro", "content": "…"},
@@ -188,11 +194,11 @@ For every post:
 - [ ] title 50–60 chars · meta_title ≤ 60 · meta_description 140–155 complete · excerpt 25–40 words complete and different · focus_keyphrase set
 - [ ] takeaways, 2 callouts, 1 pullquote, 1 bullet list, 1 ordered list, FAQ with 4–6 items
 - [ ] 2–4 [anchor](aff:ID) links using only IDs from section 6; 2 ad sections with ad_id, label, text, cta and url ""
-- [ ] 3 photos with every field and real people sharing a genuine moment; nothing repeated across the batch; unique complete alt text; featured has hero_text
+- [ ] Cover brief fits the category and title, with hero_text, hero_tagline and 3 cover_notes; 2 inline photo briefs with real people sharing a genuine moment; nothing repeated across the batch; unique complete alt text
 - [ ] Unique format_variant, hook, H2 pattern and takeaway versus every other post; no banned phrases, invented facts or reused text
-- [ ] ZIP contains only aura-posts.json; no drawn images anywhere
+- [ ] ONE ZIP: aura-posts.json plus only real generated photos (or no images folder); nothing drawn or coded
 
-Deliver Reply 1 as described in section 0: (1) the ZIP link, (2) one line per post: title — format_variant — word count — affiliate IDs used, (3) the Photo list. Then generate Photo 1.${n.batchNo < n.batches ? `\nWhen all ${photos} photos are done, I will paste batch ${n.batchNo + 1}.` : ''}`;
+Deliver the ZIP exactly as described in section 0.${n.batchNo < n.batches ? `\nWhen you are done, I will paste batch ${n.batchNo + 1}.` : ''}`;
   }
 
   function buildAll(cfg = {}) {

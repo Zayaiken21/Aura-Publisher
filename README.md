@@ -1,23 +1,31 @@
-# Aura Publisher Pro V11
+# Aura Publisher Pro V12
 
-**Frontend (GitHub Pages):** index.html, styles.css, config.js, aura-vault.js, aura-prompt.js, aura-app.js
-**Backend (Render):** server.js (API 5.0.0) — `npm install`, `npm start`, health `/healthz`
+WordPress auto-publisher fed by ONE ChatGPT ZIP per batch.
 
-## What's new in V11
-- **Accounts with passwords.** Each user creates an Aura account; the WordPress login and settings are AES-256-GCM encrypted on the device with a key derived from the password (PBKDF2-SHA256, 310k iterations). Auto-lock, lockout after repeated wrong attempts, encrypted backup/restore.
-- **Password reset** uses the WordPress Application Password saved in the account as the recovery key. Without it, the account must be deleted and recreated.
-- **Real publishing.** Publish now, schedule (with day spacing), pending review, draft or private. Re-publishing updates the same WordPress post instead of duplicating it and reuses uploaded images.
-- **Mindful Adaption Standard** enforced on import: featured image → intro → H2 sections → image → ad → examples → image → ad → checklist → takeaway. Missing pieces are filled and listed as auto-fixes.
-- **Ads in every post** from the Ad Library (link cards or HTML ad code), rotated per post.
-- **Alt text** for every image from a template when missing.
-- **AI image generation** for any image missing from the ZIP (OpenAI Images API), with retry/backoff on rate limits.
-- **ChatGPT prompt builder** tab with your ad links built in.
-- Fixes: `?rest_route=` query URLs, term lookup with HTML entities / `term_exists`, correct rate limiting behind Render's proxy, pdf-parse ESM crash, non-ASCII upload filenames, WordPress 429/503 retries.
+## Files
+- **GitHub Pages (website):** `index.html`, `styles.css`, `aura-app.js`, `aura-vault.js`, `aura-prompt.js`, `config.js` (keep your existing one)
+- **Render (engine):** `server.js`, `package.json` (`mcp-server.js` optional, unchanged)
+- `.env.example` lists the Render settings
 
-## Render environment
-```
-ALLOWED_ORIGINS=https://zayaiken21.github.io
-OPENAI_API_KEY=sk-...            # enables image generation for every user
-OPENAI_IMAGE_MODEL=gpt-image-1   # optional
-```
-`aura-v10.js` and `app.js` are no longer loaded and can be deleted.
+## Render settings
+- `ALLOWED_ORIGINS=https://zayaiken21.github.io`
+- `OPENAI_API_KEY=` needed for photo creation (or add your own key in the app under Connections)
+- `OPENAI_IMAGE_MODEL=gpt-image-1` (the same image model ChatGPT uses)
+- Test engine in the app should show **API 5.3.0**
+
+## Workflow
+1. **Standard & ads:** paste your affiliate list (`Name | link | keywords | button | description`), pick ad placement, cover style and photo speed.
+2. **ChatGPT prompt:** paste your post list (`Title | keyword | notes | affiliate IDs`). Copy one batch at a time into ChatGPT.
+3. ChatGPT returns **one ZIP**: every post, all SEO fields and a detailed brief for every photo.
+4. **Import** the ZIP. Aura checks the Mindful Adaption Standard, completes the SEO (meta title and description, excerpt, focus keyphrase, tags, alt text, media titles and descriptions), places links and ads, and creates every photo automatically — the featured cover with the post title on it, styled for the post's category.
+5. **Preview** (exact WordPress output plus a Google preview and SEO score), then publish or schedule.
+
+## Staying under limits
+- Photos are created one at a time at your chosen speed (default 4 per minute); Aura waits and retries if OpenAI asks it to slow down, and pauses with a message if your OpenAI quota runs out.
+- Bulk publishing is spaced 2 seconds apart; WordPress busy responses are retried automatically.
+- ChatGPT batches default to 2 posts so each reply finishes in one message.
+
+## Notes
+- Real photos inside a ZIP are used as they are, even with generic names like `image_1.png` (matched in order). Drawn or coded placeholder images are discarded automatically.
+- Side ads float beside the text and FAQ rich results are added when the WordPress user is an Administrator. For other roles, paste the side-card CSS (Standard & ads) into Appearance → Customize → Additional CSS.
+- Meta title, description and focus keyphrase are sent to Yoast / Rank Math. If the site does not accept them from outside, the post still publishes and the excerpt is always saved.

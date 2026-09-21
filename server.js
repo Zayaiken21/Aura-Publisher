@@ -8,8 +8,8 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '5.2.0';
-const PROTOCOL = '11.3';
+const API_VERSION = '5.3.0';
+const PROTOCOL = '12.0';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -183,7 +183,7 @@ function normalizePost(raw = {}) {
     meta_title: String(pick(raw, 'meta_title', 'seo_title')).trim(), meta_description: String(pick(raw, 'meta_description', 'seo_description')).trim(),
     focus_keyphrase: String(pick(raw, 'focus_keyphrase', 'focus_keyword')).trim(),
     primary_keyword: raw.primary_keyword || '', secondary_keywords: arr(raw.secondary_keywords),
-    format_variant: raw.format_variant || '', hero_text: clip(raw.hero_text || '', 60),
+    format_variant: raw.format_variant || '', hero_text: clip(raw.hero_text || '', 70), hero_tagline: String(raw.hero_tagline || '').trim(), cover_notes: arr(raw.cover_notes).slice(0, 3),
     categories: arr(pick(raw, 'categories', 'category')), tags: arr(raw.tags),
     status: raw.status || 'draft', date: raw.date || '',
     featured_image: fi && (fi.filename || fi.prompt) ? fi : null, sections
@@ -286,6 +286,9 @@ function applyStandard(input, o = {}) {
   if (!p.excerpt || cutOff(p.excerpt) || p.excerpt.length > 300) { p.excerpt = p.meta_description; notes.push('Fixed a cut-off excerpt'); }
   if (!p.meta_title) p.meta_title = clip(p.title, 60);
   if (!p.focus_keyphrase) p.focus_keyphrase = p.primary_keyword || '';
+  if (!p.primary_keyword && p.focus_keyphrase) p.primary_keyword = p.focus_keyphrase;
+  if (!p.tags.length) { p.tags = [...new Set([p.primary_keyword, ...(p.secondary_keywords || [])].filter(Boolean).map(t => t.replace(/\b\w/g, c => c.toUpperCase())))].slice(0, 6); if (p.tags.length) notes.push('Created tags from the keywords'); }
+  if (!p.slug) p.slug = slug(p.primary_keyword && !slug(p.title).includes(slug(p.primary_keyword)) ? `${p.primary_keyword} ${p.title}` : p.title).split('-').slice(0, 8).join('-');
   // Key takeaways box right after the intro (built from the H2s when ChatGPT did not supply one)
   if (enforce && !s.some(x => x.type === 'takeaways')) {
     const h2s = s.filter(x => x.type === 'heading' && x.level === 2 && !TAKEAWAY_RE.test(x.content) && !/checklist|faq|frequently asked/i.test(x.content)).map(x => x.content.replace(/^(step \d+:\s*)/i, '').replace(/[.?!:]+$/, ''));
@@ -318,7 +321,7 @@ function applyStandard(input, o = {}) {
     if (img.caption && (capSeen.get(lc(img.caption)) > 1 || dupCaps.has(lc(img.caption)))) { img.caption = ''; capFixed++; }
     if (!img.prompt) img.prompt = defaultPrompt(p, section, img.alt_text);
   };
-  if (p.featured_image) fix(p.featured_image, '', 0);
+  if (p.featured_image) { fix(p.featured_image, '', 0); const kwx = p.primary_keyword || p.focus_keyphrase; if (kwx && !p.featured_image.alt_text.toLowerCase().includes(kwx.toLowerCase())) p.featured_image.alt_text = clip(`${cap1(kwx)}: ${p.featured_image.alt_text.replace(/, illustrating .*$/, '')}`, 125); }
   k = 0;
   for (const x of s) { if (x.type === 'heading') lastHeading = x.content; if (x.type === 'image') fix(x, lastHeading, ++k); }
   if (altFilled) notes.push(`Rewrote ${altFilled} generic, repeated or cut-off alt text${altFilled > 1 ? 's' : ''} to describe each photo`);
@@ -334,8 +337,44 @@ function applyStandard(input, o = {}) {
     if (words > 2200) warnings.push(`About ${minutes} min read (${words} words), over the 7-minute target`);
   }
   p.sections = s;
+  p.seo = seoAudit(p, words);
   p.standard = { name: 'Mindful Adaption Standard', applied: enforce, notes, warnings, stats: { words, minutes, h2, images: s.filter(x => x.type === 'image').length + (p.featured_image ? 1 : 0), ads: s.filter(x => x.type === 'ad').length } };
   return p;
+}
+
+// Yoast-style checks so every post leaves Aura with its SEO basics done.
+function seoAudit(p, words) {
+  const kw = String(p.focus_keyphrase || p.primary_keyword || '').toLowerCase().trim();
+  const has = t => kw && String(t || '').toLowerCase().includes(kw);
+  const sec = p.sections || [];
+  const intro = sec.find(x => x.type === 'intro')?.content || '';
+  const first100 = [intro, ...sec.filter(x => x.type === 'paragraph').map(x => x.content)].join(' ').split(/\s+/).slice(0, 100).join(' ');
+  const h2 = sec.filter(x => x.type === 'heading');
+  const imgs = [p.featured_image, ...sec.filter(x => x.type === 'image')].filter(Boolean);
+  const text = sec.map(x => x.content || '').join(' ');
+  const links = (text.match(/\]\((https?:|aff:)/g) || []).length;
+  const kwCount = kw ? (text.toLowerCase().split(kw).length - 1) : 0;
+  const density = words ? kwCount * kw.split(/\s+/).length / words * 100 : 0;
+  const checks = [
+    ['Focus keyphrase set', !!kw],
+    ['Keyphrase in title', has(p.title)],
+    ['Title length 40–65 characters', p.title.length >= 40 && p.title.length <= 65],
+    ['Keyphrase in slug', kw && p.slug.includes(slug(kw))],
+    ['Meta title up to 60 characters', !!p.meta_title && p.meta_title.length <= 60],
+    ['Meta description 120–160 characters', !!p.meta_description && p.meta_description.length >= 120 && p.meta_description.length <= 160],
+    ['Keyphrase in meta description', has(p.meta_description)],
+    ['Keyphrase in the first 100 words', has(first100)],
+    ['Keyphrase in a subheading', h2.some(x => has(x.content))],
+    ['Keyphrase density 0.5–3%', density >= 0.5 && density <= 3],
+    ['At least 1,300 words', words >= 1300],
+    ['Excerpt written', !!p.excerpt && p.excerpt.length >= 60],
+    ['Every image has alt text', imgs.length > 0 && imgs.every(i => i.alt_text && i.alt_text.length >= 20)],
+    ['Keyphrase in featured image alt', has(p.featured_image?.alt_text)],
+    ['Links in the text', links >= 1],
+    ['FAQ section', sec.some(x => x.type === 'faq')],
+    ['Categories and tags', (p.categories || []).length > 0 && (p.tags || []).length >= 3]
+  ].map(([label, ok]) => ({ label, ok: !!ok }));
+  return { score: Math.round(checks.filter(c => c.ok).length / checks.length * 100), checks, density: Math.round(density * 10) / 10 };
 }
 
 function imageList(p) {
@@ -446,12 +485,63 @@ const jaccard = (a, b) => { const A = wordsOf(a), B = wordsOf(b); if (!A.size ||
 const firstSentences = (t, n = 2) => (stripHtml(t).replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+/g) || [stripHtml(t)]).slice(0, n).map(x => x.trim()).join(' ').trim();
 const isDefaultPrompt = s => !s || /^Editorial photograph for a blog article titled/.test(s) || String(s).length < 140;
 const CONTRAST_RE = /\bvs\.?\b|\bversus\b|buy and (what to )?skip|do'?s and don'?ts|\bmistakes?\b|before and after|right (way|and wrong)|\bheal\b.*\bharm\b|good (and|vs) bad/i;
+// ---------- Featured cover: category-aware, title in the picture (magazine / Pinterest-cover style) ----------
+const COVER_THEMES = [
+  [/garden|plant|soil|compost|seed|harvest|mulch|flower|lawn|yard/i, 'a lush, sun-drenched garden overflowing with healthy plants, rich dark soil, terracotta pots, a basket of fresh harvest and well-used garden tools on weathered wood', ['#2e7d32', '#8b1e1e'], 'a neglected, weedy bed with cracked dry soil, wilted plants and tangled hoses under flat grey light'],
+  [/food|nutrition|recipe|meal|diet|eat|cook|kitchen|heal|snack|drink/i, 'an abundant, glowing rustic table spread of fresh, colourful whole foods — leafy greens, berries, citrus, grains, olive oil — on warm wood', ['#2e7d32', '#8b1e1e'], 'greasy fast food, sugary soda, chips, donuts and pizza boxes on a dark table under harsh red neon'],
+  [/trad|forex|gold|xauusd|stock|invest|crypto|market|portfolio/i, 'a sleek trading desk at dawn with several monitors of softly blurred candlestick charts, gold accents, a notebook of handwritten price levels and a steaming coffee', ['#b8860b', '#7f1d1d'], 'chaotic red charts, scattered sticky notes, cold coffee and an overflowing desk at night'],
+  [/money|budget|financ|debt|saving|frugal|income|tax/i, 'a warm, organised kitchen-table money session with a budget notebook, calculator, neatly sorted envelopes, a jar of coins and coffee', ['#1e5631', '#7f1d1d'], 'scattered unpaid bills, overdue notices, receipts and an empty wallet under a harsh lamp'],
+  [/faith|god|jesus|bible|pray|church|scripture|devotion|worship|spiritual/i, 'a peaceful, light-filled scene with an open Bible, a journal, a warm mug and golden morning sun pouring through a window', ['#b8860b', '#3b3b58'], 'a dim, cluttered room lit only by a phone screen, with an unopened Bible gathering dust'],
+  [/parent|family|kid|child|mom|mother|dad|father|baby|toddler|teen/i, 'a warm, lively family home full of everyday life — a kitchen table with drawings, snacks, books and small joyful details', ['#1565c0', '#8b1e1e'], 'a chaotic, cluttered room with screens glowing and toys everywhere in cold light'],
+  [/fitness|workout|exercise|running|yoga|strength|gym|walk/i, 'an energetic, sunlit training space with a yoga mat, weights, running shoes and fresh water, full of motion', ['#e65100', '#37474f'], 'a dark couch corner with takeaway boxes, a remote and unused running shoes'],
+  [/mind|stress|anxiety|calm|mental|sleep|rest|self-care|wellbeing|wellness|gratitude|journal/i, 'a calm, softly lit sanctuary with journals, herbal tea, plants, a cosy blanket and gentle morning light', ['#00695c', '#4a148c'], 'a messy desk at midnight with piles of paper, a glowing phone and cold coffee'],
+  [/home|clean|declutter|organi|decor|house|laundry/i, 'a bright, beautifully organised home with woven baskets, plants, folded linens and soft natural textures', ['#00796b', '#6d4c41'], 'a cluttered, chaotic room with piles of laundry and boxes in grey light'],
+  [/business|entrepreneur|marketing|career|work|productiv|side hustle|brand|sales/i, 'a vibrant creative workspace with a laptop, notebooks, sticky notes, product samples and coffee in golden light', ['#1565c0', '#b71c1c'], 'a chaotic desk with tangled cables, piles of paper and missed-deadline notes'],
+  [/travel|trip|vacation|adventure|road/i, 'a sweeping travel scene with a paper map, a packed bag, a camera and a breathtaking view', ['#0277bd', '#bf360c'], ''],
+  [/relationship|marriage|love|dating|friend|couple/i, 'a warm, intimate scene of shared life with candlelight, two mugs, handwritten notes and soft textures', ['#ad1457', '#37474f'], ''],
+  [/pet|dog|cat|puppy|kitten/i, 'a joyful home scene with a happy pet, toys, treats and cosy textures', ['#ef6c00', '#455a64'], ''],
+  [/tech|\bai\b|app|software|digital|computer|online/i, 'a clean, modern tech workspace with glowing screens of soft abstract shapes, cables tidied and warm desk light', ['#1565c0', '#263238'], '']
+];
+function coverTheme(p) {
+  const hay = `${(p.categories || []).join(' ')} ${p.title} ${p.primary_keyword} ${(p.tags || []).join(' ')}`;
+  return COVER_THEMES.find(([re]) => re.test((p.categories || []).join(' '))) || COVER_THEMES.find(([re]) => re.test(hay)) || [null, 'a rich, abundant, sunlit lifestyle scene with layered real-world details that say exactly what the article is about', ['#1565c0', '#8b1e1e']];
+}
+const shortPhrase = t => { const w = stripHtml(String(t || '')).replace(/[*_[\]()]/g, '').replace(/[.!?,:;]+$/, '').split(/\s+/).filter(Boolean); let o = w.slice(0, 4); while (o.length > 1 && /^(a|an|the|to|of|and|or|in|on|for|with|your|every)$/i.test(o[o.length - 1])) o.pop(); return o.join(' '); };
+function coverPrompt(p, choice, o = {}) {
+  const style = o.coverStyle || (o.heroText === false ? 'photo' : 'full');
+  const [, theme, [c1, c2], wrongSide] = coverTheme(p);
+  const cat = (p.categories || [])[0] || p.primary_keyword || 'lifestyle';
+  const H = heroHeadline(p);
+  const split = CONTRAST_RE.test(p.title);
+  const vs = split && p.title.match(/^(.*?)\s+(?:vs\.?|versus)\s+(.*)$/i);
+  const takeaways = (p.sections || []).find(x => x.type === 'takeaways')?.items || [];
+  const notes = (p.cover_notes?.length ? p.cover_notes.map(shortPhrase) : takeaways.filter(t => stripHtml(t).split(/\s+/).length <= 4).map(shortPhrase)).filter(x => x && x.length <= 28).slice(0, 3);
+  const tagline = clip(p.hero_tagline || '', 48);
+  const people = `${choice.people} ${choice.action}, sharing a genuine, candid moment (${choice.emotion}) within the scene, placed so they never cover the lettering`;
+  const scene = split
+    ? `Split composition with a torn-paper divide down the middle: the left side is bright, abundant and hopeful — ${theme}, with ${people}; the right side is darker, moodier and messier, showing the wrong way for this topic${wrongSide ? ` — ${wrongSide}` : ''}.`
+    : `${theme[0].toUpperCase() + theme.slice(1)}, tailored precisely to "${p.title}", with ${people}.`;
+  if (style === 'photo') return `Photorealistic, vibrant editorial header photograph for a ${cat} article titled "${p.title}". ${scene} ${choice.light}, ${choice.lens}, rich layered detail. ${realism(false)}`;
+  const headlineLine = vs && style === 'full'
+    ? `Typography: huge bold hand-painted white brush-script lettering. On the left over a painted ${c1} brush-stroke banner: "${clean0(vs[1])}". A bold "vs." in the centre. On the right over a painted ${c2} brush-stroke banner: "${clean0(vs[2])}".`
+    : `Typography: the headline "${H}" in huge, bold, hand-painted white brush-script lettering over a painted ${split ? `${c1} and ${c2}` : c1} brush-stroke banner, dominant in the upper third, like a premium magazine or Pinterest cover.`;
+  const extra = style === 'full' ? [
+    tagline ? `Beneath the headline, a small clean uppercase sans-serif tagline with generous letter-spacing reading exactly "${tagline}".` : '',
+    notes.length ? `Inside the scene, ${notes.length} small handwritten details (on a chalkboard, a note card or a notebook page with check marks) reading exactly: ${notes.map(n => `"${n}"`).join(', ')}.` : ''
+  ].filter(Boolean).join(' ') : '';
+  return `Premium blog cover image, landscape 3:2, photorealistic and richly styled — it must instantly read as a ${cat} article about "${p.title}".
+Scene: ${scene}
+${headlineLine} ${extra}
+Every piece of text is spelled exactly as given, crisp and fully legible; no other words, no logos, no brand names, no watermarks.
+Look: warm, sun-drenched natural light (${choice.light}), vivid true-to-life colour, extremely high detail, layered foreground-to-background abundance, shallow depth of field at the edges, shot on a full-frame camera with a ${choice.lens}. Real textures: wood grain, soil, leaves, fabric, skin. Not an illustration, not a cartoon, not flat vector art, not a 3D render.`;
+}
 function heroHeadline(p) {
-  const t = clean0(p.hero_text || p.title);
-  const words = t.split(/\s+/);
-  if (words.length <= 7) return t;
-  const head = t.split(/[:—–-]\s/)[0];
-  return head.split(/\s+/).length <= 7 ? head : words.slice(0, 6).join(' ');
+  // The post title goes on the cover. Only very long titles fall back to ChatGPT's hero_text or the part before the colon.
+  const title = clean0(p.title);
+  if (title.split(/\s+/).length <= 9) return title;
+  if (p.hero_text && clean0(p.hero_text).split(/\s+/).length <= 9) return clean0(p.hero_text);
+  const head = title.split(/[:—–]\s|\s-\s/)[0];
+  return head.split(/\s+/).length <= 9 ? head : title.split(/\s+/).slice(0, 8).join(' ');
 }
 function clean0(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 
@@ -506,12 +596,12 @@ function artDirect(p, o = {}) {
   const briefs = [];
   const postAll = `${(p.categories || []).join(' ')} ${(p.tags || []).join(' ')} ${s.map(x => x.content || (x.items || []).join(' ')).join(' ')}`;
   for (const { img, role, ctx } of list) {
-    const hi = role === 'hero' ? `${p.title} ${p.primary_keyword || ''} ${img.subject || ''}` : `${img.concept || ''} ${ctx.heading} ${img.subject || ''}`;
+    const hi = role === 'hero' ? `${p.title} ${p.primary_keyword || ''} ${(p.categories || []).join(' ')} ${img.subject || ''}` : `${img.concept || ''} ${ctx.heading} ${img.subject || ''}`;
     const lo = role === 'hero' ? `${p.excerpt || ''} ${intro}` : ctx.text;
     const tail = `${p.title} ${p.primary_keyword || ''} ${(p.secondary_keywords || []).join(' ')} ${(p.categories || []).join(' ')}`;
     const count = (re, t) => (String(t).match(new RegExp(re.source, 'gi')) || []).length;
     // broad catch-all concepts (e.g. plain "garden") count half, so the specific concept in a title wins
-    const scored = V_GLOSSARY.map(g => ({ g, score: (count(g.re, hi) * 4 + count(g.re, lo) + count(g.re, tail) * 0.5) * (g.keys[0] === 'garden' ? 0.5 : 1) + Math.min(2, count(g.re, postAll) * 0.05) - (usedEntries.get(g) || 0) * 1.5 - (entryUse.get(g) || 0) * 0.25 })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+    const scored = V_GLOSSARY.map(g => ({ g, score: (count(g.re, hi) * (role === 'hero' ? 12 : 4) + count(g.re, lo) * (role === 'hero' ? 0.3 : 1) + count(g.re, tail) * 0.5) * (g.keys[0] === 'garden' ? 0.5 : 1) + Math.min(2, count(g.re, postAll) * 0.05) - (usedEntries.get(g) || 0) * 1.5 - (entryUse.get(g) || 0) * 0.25 })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
     // rotate among close contenders so a batch on one niche still gets different scenes
     const close = scored.filter(x => x.score >= (scored[0]?.score || 0) * 0.55).slice(0, 3);
     const entry = role === 'hero' ? (scored[0]?.g || null) : close.length ? close[hash(`${p.post_id}|${img.filename}|entry`) % close.length].g : null;
@@ -567,7 +657,7 @@ function artDirect(p, o = {}) {
     const avoid = others.map(x => `${x.choice.shot} in ${x.choice.setting}`).join('; ');
     // ChatGPT's own detailed brief is kept as the scene; Aura only adds camera and realism so nothing contradicts it
     const core = b.base ? (tooClose ? `${b.base}\nComposition override so this image is clearly different from the others: ${b.art}` : `${b.base}\n${b.camera}`) : b.art;
-    b.img.render_prompt = `Photorealistic, vibrant editorial lifestyle photograph. ${core}\n${b.purpose}\nMust look clearly different from the other images in this article (${avoid || 'none'}).\n${realism(!!b.heroText)}`;
+    b.img.render_prompt = b.img.featured || b === briefs[0] && p.featured_image === b.img ? coverPrompt(p, b.choice, o) : `Photorealistic, vibrant editorial lifestyle photograph. ${core}\n${b.purpose}\nMust look clearly different from the other images in this article (${avoid || 'none'}).\n${realism(false)}`;
     b.img.sig = b.sig;
     b.img.art = { scene: b.scene, shot: b.choice.shot, setting: b.choice.setting, time_of_day: b.choice.time, lighting: b.choice.light, lens: b.choice.lens, palette: b.choice.palette, headline: b.heroText || '' };
     b.img.art_alt = clip(`${cap1(b.scene)} ${onIn(b.choice.setting)} ${b.choice.setting}`, 95);
@@ -606,6 +696,32 @@ function imageDims(b) {
   }
   if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return { type: 'webp' };
   return null;
+}
+// Photos in the ZIP whose names don't match the manifest (e.g. "image_3.png") fill the empty photo spots in order:
+// post 1 featured, inline-1, inline-2, then post 2… The spot takes the photo's real file type.
+function assignLooseImages(rawPosts, assetMap, existing = []) {
+  const slots = [];
+  for (const raw of rawPosts) {
+    if (!raw || typeof raw !== 'object') continue;
+    if (raw.featured_image && typeof raw.featured_image === 'object') slots.push(raw.featured_image);
+    for (const sec of Array.isArray(raw.sections) ? raw.sections : []) if (sec && String(sec.type).toLowerCase() === 'image') slots.push(sec);
+  }
+  const fname = o => String(o.filename || o.file || '').split('/').pop();
+  const referenced = new Set(slots.map(o => lc(fname(o))).filter(Boolean));
+  const have = new Set([...assetMap.keys(), ...existing.map(lc)]);
+  const loose = [...assetMap.entries()].filter(([k]) => !referenced.has(k)).sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, { numeric: true }));
+  const empty = slots.filter(o => !fname(o) || !have.has(lc(fname(o))));
+  let n = 0;
+  for (const [k, a] of loose) {
+    const slot = empty.shift(); if (!slot) break;
+    const ext = a.name.split('.').pop().toLowerCase().replace('jpeg', 'jpg');
+    const base = (fname(slot) || `photo-${n + 1}.jpg`).replace(/\.[a-z0-9]+$/i, '');
+    const name = `${base}.${ext}`;
+    slot.filename = name; delete slot.file;
+    assetMap.delete(k); assetMap.set(lc(name), { ...a, name, mime: mimeFor(name) });
+    n++;
+  }
+  return n;
 }
 function looksPlaceholder(buf) {
   const d = imageDims(buf);
@@ -961,6 +1077,7 @@ async function setMediaMeta(w, id, meta) {
   if (meta.alt) patch.alt_text = meta.alt;
   if (meta.caption) patch.caption = meta.caption;
   if (meta.title) patch.title = meta.title;
+  if (meta.description) patch.description = meta.description;
   if (Object.keys(patch).length) await wpFetch(w, `media/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
 }
 async function uploadMedia(w, file, meta) {
@@ -971,7 +1088,7 @@ async function uploadMedia(w, file, meta) {
 }
 
 // ---------- routes ----------
-const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true } });
+const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
 app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V11 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
@@ -1002,11 +1119,12 @@ app.post('/api/import', upload.array('files', 200), async (req, res) => {
     const { rawPosts, manifestSource, assetMap } = await importEntries(entries);
     const rejected = [];
     if (options.rejectPlaceholders !== false) for (const [k, a] of assetMap) if (looksPlaceholder(a.buffer)) { rejected.push(a.name); assetMap.delete(k); }
+    const matchedByOrder = assignLooseImages(rawPosts, assetMap, options.existingAssets || []);
     const extra = Array.isArray(options.existingAssets) ? options.existingAssets : [];
     const names = [...assetMap.values()].map(a => a.name);
     const posts = preparePosts(rawPosts, [...names, ...extra], options);
     res.json({
-      protocolVersion: PROTOCOL, manifestSource, posts, rejectedImages: rejected,
+      protocolVersion: PROTOCOL, manifestSource, posts, rejectedImages: rejected, matchedByOrder,
       assets: [...assetMap.values()].map(a => ({ name: a.name, mime: a.mime, size: a.buffer.length, dataBase64: a.buffer.toString('base64') })),
       summary: { posts: posts.length, assets: names.length, ready: posts.filter(p => p.validation.ok).length, rejectedImages: rejected.length, invalid: posts.filter(p => !p.validation.ok).length, pendingImages: posts.reduce((t, p) => t + p.validation.pendingImages.length, 0) }
     });
@@ -1039,7 +1157,7 @@ app.post('/api/images/generate', imageLimiter, async (req, res) => {
   const name = asciiName(filename || 'aura-image.jpg');
   const ext = name.toLowerCase().split('.').pop();
   const format = ext === 'png' ? 'png' : ext === 'webp' ? 'webp' : 'jpeg';
-  const fullPrompt = `${prompt}\n\nOverall visual style: ${style || 'Photorealistic editorial photography, natural light, authentic real people and settings, shallow depth of field, warm and hopeful mood.'}${/Realism requirements/.test(prompt) ? '' : '\nStrict rules: photorealistic, no text, no letters, no captions, no watermarks, no logos, no brand names, no UI screenshots, realistic hands and faces.'}`.slice(0, 30000);
+  const fullPrompt = `${prompt}\n\nOverall visual style: ${style || 'Photorealistic editorial photography, natural light, authentic real people and settings, shallow depth of field, warm and hopeful mood.'}${/Realism requirements|Premium blog cover|spelled exactly/.test(prompt) ? '' : '\nStrict rules: photorealistic, no text, no letters, no captions, no watermarks, no logos, no brand names, no UI screenshots, realistic hands and faces.'}`.slice(0, 30000);
   const dalle = /^dall-e/i.test(IMAGE_MODEL);
   const body = dalle
     ? { model: IMAGE_MODEL, prompt: fullPrompt.slice(0, 3900), n: 1, size: '1792x1024', response_format: 'b64_json' }
@@ -1105,7 +1223,7 @@ app.post('/api/publish', upload.array('assets', 200), async (req, res) => {
     for (const img of imageList(p)) {
       const k = lc(img.filename);
       if (media[k]) continue;
-      const meta = { alt: img.alt_text, caption: img.caption, title: clip(img.alt_text || p.title, 90) };
+      const meta = { alt: img.alt_text, caption: img.caption, title: clip(img.featured ? `${p.title} — featured image` : (img.alt_text || p.title), 90), description: clip(`${img.alt_text}. From the article "${p.title}".`, 300) };
       if (existing[k]?.id && !files[k]) {
         try { const m = await wpFetch(creds, `media/${existing[k].id}?_fields=id,source_url`); media[k] = { id: m.id, source_url: m.source_url }; reused++; continue; } catch {}
       }

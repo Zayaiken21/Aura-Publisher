@@ -10,7 +10,7 @@
 
   const DEFAULTS = {
     wp: { url: '', username: '', appPassword: '' }, openaiKey: '',
-    standard: { enforce: true, autoGenerate: true, quality: 'high', imagesPerMinute: 4, heroText: true, rejectPlaceholders: true, altTemplate: '{subject|caption|section|title}, illustrating {keyword}',
+    standard: { enforce: true, autoGenerate: true, quality: 'high', imagesPerMinute: 4, coverStyle: 'full', heroText: true, rejectPlaceholders: true, altTemplate: '{subject|caption|section|title}, illustrating {keyword}',
       style: 'Vibrant, richly detailed editorial lifestyle photography: real people sharing genuine moments, warm natural sunlight, abundant layered scenes, true-to-life colour, magazine-cover quality.' },
     ads: [], adLabel: 'Sponsored',
     adLayout: { top: true, topPosition: 'after-intro', side: true, sideMax: 2, textLinks: true, textLinkMax: 3, end: true, endMax: 3, disclosure: true, disclosureText: 'This post contains affiliate links. If you buy through them, we may earn a small commission at no extra cost to you.', wordsPerAd: 350 },
@@ -47,7 +47,7 @@
     return j;
   }
   const canGenerate = () => !!(health.features?.imageGeneration || S?.openaiKey);
-  const stdOptions = () => ({ enforce: S.standard.enforce, canGenerate: canGenerate(), altTemplate: S.standard.altTemplate, heroText: S.standard.heroText !== false, rejectPlaceholders: S.standard.rejectPlaceholders !== false, usedSignatures: (ws.sigs || []).slice(-1500) });
+  const stdOptions = () => ({ enforce: S.standard.enforce, canGenerate: canGenerate(), altTemplate: S.standard.altTemplate, heroText: S.standard.coverStyle !== 'photo', coverStyle: S.standard.coverStyle || 'full', rejectPlaceholders: S.standard.rejectPlaceholders !== false, usedSignatures: (ws.sigs || []).slice(-1500) });
   // Remember every photo "signature" (setting + shot + time) so new posts never repeat an earlier image.
   function rememberSigs(posts) {
     const all = new Set(ws.sigs || []);
@@ -96,18 +96,19 @@
       const st = p.standard?.stats || {}, v = p.validation || {};
       const badges = [
         v.ok ? `<span class="b ok">Ready</span>` : `<span class="b bad">Needs fixes</span>`,
-        p.pending?.length ? `<span class="b warn">${p.pending.length} image${p.pending.length > 1 ? 's' : ''} to generate</span>` : `<span class="b">Images ready</span>`,
+        p.pending?.length ? `<span class="b warn">${p.pending.filter(f => inflight.has(f)).length ? 'Creating photos…' : `${p.pending.length} photo${p.pending.length > 1 ? 's' : ''} to create`}</span>` : `<span class="b ok">Photos ready</span>`,
+        p.seo ? `<span class="b ${p.seo.score >= 80 ? 'ok' : p.seo.score >= 60 ? 'warn' : 'bad'}">SEO ${p.seo.score}</span>` : '',
         p.wp?.id ? `<a class="b live" href="${esc(p.wp.link)}" target="_blank" rel="noopener">${esc(statusLabel[p.wp.status] || p.wp.status)} · #${p.wp.id}</a>` : ''
       ].join('');
       const meta = [st.words ? `${st.words.toLocaleString()} words · ${st.minutes} min read` : '', p.format_variant, `${st.images ?? images(p).length} images`, `${st.ads ?? 0} ads`].filter(Boolean).join(' · ');
-      const issues = [...(v.errors || []).map(e => `<li class="bad">${esc(e)}</li>`), ...(v.warnings || []).map(e => `<li class="warn">${esc(e)}</li>`), ...(p.standard?.notes || []).map(e => `<li>${esc(e)}</li>`)].join('');
+      const issues = [...(v.errors || []).map(e => `<li class="bad">${esc(e)}</li>`), ...(p.seo?.checks || []).filter(c => !c.ok).map(c => `<li class="warn">SEO: ${esc(c.label)}</li>`), ...(v.warnings || []).map(e => `<li class="warn">${esc(e)}</li>`), ...(p.standard?.notes || []).map(e => `<li>${esc(e)}</li>`)].join('');
       const tgt = p.target?.status || '';
       return `<article class="card" data-i="${i}">
         <div class="card-main">
           <h3>${esc(p.title || 'Untitled post')}</h3>
           <p class="meta">${esc(meta)}</p>
           <div class="badges">${badges}</div>
-          ${issues ? `<details class="issues"><summary>${(v.errors || []).length} errors · ${(v.warnings || []).length} warnings · ${(p.standard?.notes || []).length} auto-fixes</summary><ul>${issues}</ul></details>` : ''}
+          ${issues ? `<details class="issues"><summary>${(v.errors || []).length} errors · ${(v.warnings || []).length} warnings · ${(p.seo?.checks || []).filter(c => !c.ok).length} SEO tips · ${(p.standard?.notes || []).length} auto-fixes</summary><ul>${issues}</ul></details>` : ''}
         </div>
         <div class="card-act">
           <select data-act="status" aria-label="Publish status for this post">
@@ -117,7 +118,7 @@
           ${tgt === 'future' ? `<input type="datetime-local" data-act="date" value="${esc(p.target?.date || '')}" aria-label="Schedule date">` : ''}
           <div class="btns">
             <button data-act="preview">Preview</button>
-            <button data-act="photos">Photos</button>
+            <button data-act="photos" class="ghost" title="Use your own photos for this post">Own photos</button>
             ${p.pending?.length ? `<button data-act="gen" ${canGenerate() ? '' : 'disabled title="Image generation is not configured"'}>Generate images</button>` : ''}
             <button class="primary" data-act="publish" ${v.ok ? '' : 'disabled'}>${p.wp?.id ? 'Update' : 'Publish'}</button>
             <button class="ghost danger x" data-act="remove" aria-label="Remove ${esc(p.title)}">×</button>
@@ -173,27 +174,59 @@
   $('#bulkGap').onchange = () => { S.publish.gapDays = Number($('#bulkGap').value); V.save(S).catch(() => {}); };
 
   // ---------- image generation ----------
-  let lastImageAt = 0;
+  // ---------- photos: one image at a time, paced under your per-minute limit, shared by the background worker and publishing ----------
+  let lastImageAt = 0, imgChain = Promise.resolve();
+  const inflight = new Set();
+  const lockImg = fn => { const run = imgChain.then(fn, fn); imgChain = run.catch(() => {}); return run; };
+  async function generateOne(p, img) {
+    return lockImg(async () => {
+      if (!S || (await assetGet(img.filename))) return false; // made meanwhile, or signed out
+      inflight.add(img.filename);
+      try {
+        const gap = 60000 / Math.max(1, Number(S.standard.imagesPerMinute) || 4);
+        const wait = lastImageAt + gap - Date.now();
+        if (wait > 0) { photoStatus(`Next photo in ${Math.ceil(wait / 1000)} s (staying under ${S.standard.imagesPerMinute || 4} per minute)`); await sleep(wait); }
+        lastImageAt = Date.now();
+        photoStatus(`Creating ${img.featured ? 'cover' : 'photo'} for "${p.title}"…`);
+        log(`Generating ${img.filename}`);
+        const j = await api('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.render_prompt || img.prompt || `${p.title}. ${img.alt_text}`, filename: img.filename, style: S.standard.style, quality: img.featured ? 'high' : S.standard.quality, openaiKey: S.openaiKey || undefined }) }, 4);
+        await assetPut({ name: img.filename, mime: j.mime, dataBase64: j.dataBase64, size: j.dataBase64.length * 0.75 });
+        log(`Created ${img.filename}`, 'ok');
+        return true;
+      } finally { inflight.delete(img.filename); }
+    });
+  }
   async function generateFor(p) {
     if (!canGenerate()) throw new Error('Image generation is not configured. Add OPENAI_API_KEY on Render or your own key in Connections.');
     await refreshPending();
-    const todo = images(p).filter(i => p.pending.includes(i.filename));
-    let n = 0;
-    for (const img of todo) {
-      // Pace requests to the chosen images-per-minute so OpenAI never has to refuse one.
-      const gap = 60000 / Math.max(1, Number(S.standard.imagesPerMinute) || 4);
-      const wait = lastImageAt + gap - Date.now();
-      if (wait > 0) { progress(n, todo.length, `Pacing to stay under your image limit… ${Math.ceil(wait / 1000)} s`); await sleep(wait); }
-      lastImageAt = Date.now();
-      progress(n, todo.length, `Generating ${img.filename} (${n + 1}/${todo.length})…`);
-      log(`Generating ${img.filename}`);
-      const j = await api('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.render_prompt || img.prompt || `${p.title}. ${img.alt_text}`, filename: img.filename, style: S.standard.style, quality: S.standard.quality, openaiKey: S.openaiKey || undefined }) }, 4);
-      await assetPut({ name: img.filename, mime: j.mime, dataBase64: j.dataBase64, size: j.dataBase64.length * 0.75 });
-      n++; log(`Created ${img.filename}`, 'ok');
-    }
-    progress(null);
+    const todo = images(p).map((i, k) => ({ ...i, featured: k === 0 && !!p.featured_image })).filter(i => p.pending.includes(i.filename));
+    for (const img of todo) await generateOne(p, img);
+    await refreshPending(); render();
+  }
+  // Background worker: after an import (or when you come back), every missing photo is created in queue order.
+  const worker = { on: false, paused: false, done: 0, total: 0, error: '' };
+  function photoStatus(msg) { const el = $('#photoRun'); if (!el) return; el.hidden = !worker.on && !worker.error; $('#photoRunMsg').textContent = msg; $('#photoRunBar').style.width = `${worker.total ? Math.round(worker.done / worker.total * 100) : 0}%`; $('#photoRunCount').textContent = worker.total ? `${worker.done} of ${worker.total} photos` : ''; $('#photoPause').textContent = worker.paused ? 'Resume' : 'Pause'; }
+  async function startPhotoWorker() {
+    if (worker.on || !S || !canGenerate() || S.standard.autoGenerate === false) return;
     await refreshPending();
-    if (todo.length) toast(`Generated ${todo.length} image${todo.length > 1 ? 's' : ''} for "${p.title}".`, 'ok');
+    const jobs = ws.posts.flatMap(p => images(p).map((i, k) => ({ p, img: { ...i, featured: k === 0 && !!p.featured_image } })).filter(x => p.pending?.includes(x.img.filename)));
+    if (!jobs.length) return;
+    Object.assign(worker, { on: true, paused: false, done: 0, total: jobs.length, error: '' });
+    photoStatus('Starting photos…');
+    for (const { p, img } of jobs) {
+      while (worker.paused && S) await sleep(500);
+      if (!S || !worker.on) break;
+      if (!ws.posts.includes(p)) { worker.done++; continue; }
+      try { await generateOne(p, img); worker.done++; await refreshPending(); render(); }
+      catch (e) {
+        worker.error = e.message; log(`Photo paused: ${e.message}`, 'bad');
+        if (/quota|billing|not configured|key/i.test(e.message)) { worker.paused = true; photoStatus(`Paused — ${e.message}`); toast(`Photos paused: ${e.message}`, 'bad', 9000); while (worker.paused && S) await sleep(1000); }
+        else await sleep(20000); // temporary problem: wait, then carry on with the next photo
+      }
+      photoStatus(worker.paused ? 'Paused' : `${worker.done} of ${worker.total} done`);
+    }
+    worker.on = false; photoStatus(''); if ($('#photoRun')) $('#photoRun').hidden = true;
+    if (S) { await refreshPending(); render(); const left = ws.posts.reduce((t, p) => t + (p.pending?.length || 0), 0); if (!left && worker.total) toast(`All ${worker.total} photos are ready.`, 'ok', 6000); else if (left) setTimeout(startPhotoWorker, 1000); }
   }
 
   // ---------- publishing ----------
@@ -256,11 +289,12 @@
     toast(`Done: ${ok} sent${fail ? `, ${fail} failed (see Activity)` : ''}.`, fail ? 'warn' : 'ok', 7000);
   };
   $('#genAll').onclick = async () => {
-    if (busy) return; busy = true;
-    try { await refreshPending(); const list = ws.posts.filter(p => p.pending?.length); if (!list.length) toast('All images are ready.', 'ok'); for (const p of list) { await generateFor(p); render(); } }
-    catch (e) { toast(e.message, 'bad', 8000); log(e.message, 'bad'); }
-    finally { busy = false; progress(null); render(); }
+    await refreshPending(); if (!ws.posts.some(p => p.pending?.length)) return toast('All photos are ready.', 'ok');
+    if (!canGenerate()) return toast('Image generation is not configured. Add OPENAI_API_KEY on Render or your own key in Connections.', 'bad', 8000);
+    if (worker.on) { worker.paused = false; return photoStatus('Resumed'); }
+    const was = S.standard.autoGenerate; S.standard.autoGenerate = true; startPhotoWorker(); S.standard.autoGenerate = was;
   };
+  $('#photoPause').onclick = () => { worker.paused = !worker.paused; photoStatus(worker.paused ? 'Paused' : 'Resuming…'); };
   $('#clearAll').onclick = async () => { if (!ws.posts.length || !confirm('Remove every post and stored image from this queue? WordPress is not touched.')) return; ws.posts = []; await assetClearUser(uid); saveWs(); render(); toast('Queue cleared.'); };
 
   // ---------- preview ----------
@@ -345,10 +379,11 @@
       await refreshPending(); render();
       const pend = ws.posts.reduce((t, p) => t + (p.pending?.length || 0), 0);
       const fixes = j.posts.reduce((t, p) => t + (p.standard?.notes?.length || 0), 0);
-      const rej = (j.rejectedImages || []).length;
-      $('#importState').textContent = `Imported ${j.posts.length} posts and ${j.assets.length} images from ${j.manifestSource || 'files'} · ${j.summary.ready} ready · ${fixes} auto-fixes · ${pend} images to generate${rej ? ` · ${rej} drawn placeholder image${rej > 1 ? 's' : ''} replaced with real-photo generation` : ''}.`;
+      const rej = (j.rejectedImages || []).length, byOrder = j.matchedByOrder || 0;
+      $('#importState').textContent = `Imported ${j.posts.length} posts and ${j.assets.length} images from ${j.manifestSource || 'files'} · ${j.summary.ready} ready · ${fixes} auto-fixes · ${pend} images to generate${byOrder ? ` · ${byOrder} ZIP photo${byOrder > 1 ? 's' : ''} matched by order` : ''}${rej ? ` · ${rej} drawn placeholder image${rej > 1 ? 's' : ''} discarded` : ''}${pend && canGenerate() ? ' · photos are being created now' : ''}.`;
       log($('#importState').textContent, 'ok');
       switchTab('queue');
+      if (pend) setTimeout(startPhotoWorker, 300);
     } catch (e) { $('#importState').textContent = `Import failed: ${e.message}`; toast(e.message, 'bad', 8000); }
   }
   $('#importBtn').onclick = () => importFiles($('#files').files);
@@ -421,15 +456,11 @@
     $('#photoState').textContent = `${n} photos added · ${left} still missing`;
   };
   $('#photoFiles').onchange = async () => { const f = $('#photoFiles').files, ids = pickPhotosFor; pickPhotosFor = null; await addPhotos(f, ids); $('#photoFiles').value = ''; };
-  const pdrop = $('#photoDrop');
-  pdrop.ondragover = e => { e.preventDefault(); pdrop.classList.add('drag'); };
-  pdrop.ondragleave = () => pdrop.classList.remove('drag');
-  pdrop.ondrop = e => { e.preventDefault(); pdrop.classList.remove('drag'); addPhotos(e.dataTransfer.files); };
 
   // ---------- standard & ads ----------
   function fillStandard() {
     $('#stEnforce').checked = S.standard.enforce; $('#stAutoGen').checked = S.standard.autoGenerate; $('#stQuality').value = S.standard.quality;
-    $('#stHeroText').checked = S.standard.heroText !== false; $('#stRejectPh').checked = S.standard.rejectPlaceholders !== false;
+    $('#stCover').value = S.standard.coverStyle || (S.standard.heroText === false ? 'photo' : 'full'); $('#stRejectPh').checked = S.standard.rejectPlaceholders !== false;
     $('#stIpm').value = String(S.standard.imagesPerMinute || 4);
     $('#stAlt').value = S.standard.altTemplate; $('#stStyle').value = S.standard.style; $('#adLabel').value = S.adLabel;
     const L = S.adLayout;
@@ -525,7 +556,7 @@
     catch (e) { toast('Could not copy the CSS: ' + e.message, 'bad'); }
   };
   $('#saveStandard').onclick = async () => {
-    Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, heroText: $('#stHeroText').checked, rejectPlaceholders: $('#stRejectPh').checked, imagesPerMinute: Number($('#stIpm').value), altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
+    Object.assign(S.standard, { enforce: $('#stEnforce').checked, autoGenerate: $('#stAutoGen').checked, quality: $('#stQuality').value, coverStyle: $('#stCover').value, heroText: $('#stCover').value !== 'photo', rejectPlaceholders: $('#stRejectPh').checked, imagesPerMinute: Number($('#stIpm').value), altTemplate: $('#stAlt').value.trim() || DEFAULTS.standard.altTemplate, style: $('#stStyle').value.trim() });
     await V.save(S); updateDetails(); toast(ws.posts.length ? 'Standard saved. Tap "Re-apply to queue" to update posts already imported.' : 'Standard saved.', 'ok', 6000);
   };
   $('#reapply').onclick = async () => {
@@ -705,7 +736,7 @@
     $('#autoLock').value = String(S.autoLockMin || 30);
     await refreshPending().catch(() => {}); render(); genState(); bumpIdle();
     switchTab('queue');
-    upgradeQueue().catch(e => log(`Queue upgrade skipped: ${e.message}`, 'warn'));
+    upgradeQueue().catch(e => log(`Queue upgrade skipped: ${e.message}`, 'warn')).finally(() => setTimeout(startPhotoWorker, 1500));
   }
   // One-time upgrade of posts imported by older versions: drop drawn placeholder images and rebuild photo direction.
   async function isPlaceholder(a) {
@@ -731,6 +762,7 @@
     if (dropped) { log(`Removed ${dropped} drawn placeholder image${dropped > 1 ? 's' : ''}; real photos will be generated instead.`, 'ok'); toast(`${dropped} placeholder images will be replaced with real photos.`, 'ok'); }
   }
   function lockUi() {
+    worker.on = false; worker.paused = false;
     V.lock(); S = null; uid = null; ws = { posts: [], schemaVersion: 11 };
     clearTimeout(idleTimer); $('#app').hidden = true; $('#lock').hidden = false;
     $('#list').innerHTML = ''; $('#log').innerHTML = ''; ['#wpPass', '#oaKey', '#aCur', '#aNew', '#aNew2'].forEach(s => $(s).value = '');
