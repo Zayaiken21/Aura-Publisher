@@ -16,3 +16,11 @@ Enter the root Site URL, WordPress username (email may work depending on the sit
 
 ## Deploy
 Put all files at the GitHub repository root so `index.html` is at `/index.html`. Render can use the same repository and runs `server.js`.
+
+
+## V6 CORS / WordPress connection fix
+V6 removes the browser `Cache-Control` request header from WordPress connection tests. That header was triggering a CORS preflight that V5 did not permit, which could surface as `Could not reach Aura Engine` even when `/healthz` was online. The backend also now accepts `Cache-Control` for compatibility and normalizes trailing slashes in allowed origins.
+
+Render: `ALLOWED_ORIGINS=https://zayaiken21.github.io`
+
+After deploying these files, use Render **Clear build cache & deploy** and hard-refresh/reload GitHub Pages so the new `app.js` is loaded.

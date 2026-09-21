@@ -1,8 +1,9 @@
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import multer from 'multer'; import AdmZip from 'adm-zip'; import mammoth from 'mammoth'; import pdf from 'pdf-parse';
 const app=express(), upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:100}}); const PORT=process.env.PORT||8787;
 const defaultOrigins=['https://zayaiken21.github.io'];
-const origins=[...new Set([...defaultOrigins,...(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)])];
-const corsOptions={origin:(origin,cb)=>{if(!origin||origins.includes(origin))return cb(null,true);console.warn('Blocked CORS origin:',origin);return cb(new Error('Origin not allowed'));},methods:['GET','POST','OPTIONS'],allowedHeaders:['Content-Type','Authorization']};
+const cleanOrigin=x=>String(x||'').trim().replace(/\/+$/,'');
+const origins=[...new Set([...defaultOrigins,...(process.env.ALLOWED_ORIGINS||'').split(',')].map(cleanOrigin).filter(Boolean))];
+const corsOptions={origin:(origin,cb)=>{const clean=cleanOrigin(origin);if(!origin||origins.includes(clean))return cb(null,true);console.warn('Blocked CORS origin:',origin);return cb(null,false);},methods:['GET','POST','OPTIONS'],allowedHeaders:['Content-Type','Authorization','Cache-Control'],optionsSuccessStatus:204};
 app.use(helmet({crossOriginResourcePolicy:false})); app.use(cors(corsOptions)); app.options(/.*/,cors(corsOptions)); app.use(express.json({limit:'10mb'})); app.use(rateLimit({windowMs:60000,limit:120}));
 // Browser API routes are protected by strict CORS and WordPress itself authenticates publishing credentials.
 // ADMIN_TOKEN is intentionally not exposed to the public GitHub Pages frontend.
