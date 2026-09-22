@@ -277,7 +277,7 @@
               <label>WordPress location<select id="tbTarget"><option value="">Refresh WordPress first</option></select></label>
               <label>Status<select id="tbStatus"><option value="publish">Publish live</option><option value="draft">Draft</option><option value="pending">Pending review</option><option value="private">Private</option></select></label>
             </div>
-            <p class="hint" id="tbDestHint">Install Aura Site Bridge for a full archive takeover without raw CSS appearing in WordPress content.</p>
+            <p class="hint" id="tbDestHint">Choose the exact WordPress destination. Category names are pulled from WordPress and displayed exactly as written. Full Aura Archive replaces the category body while preserving your WordPress header, footer and live post data.</p>
             <div class="grid3 studio-options">
               <label>Category takeover<select id="tbArchiveMode"><option value="full">Full Aura archive</option><option value="header">Aura header + theme posts</option></select></label>
               <label>Live WordPress posts<select id="tbNativePosts"><option value="yes">Show latest category posts</option><option value="no">Template sections only</option></select></label>
@@ -318,7 +318,7 @@
           </div>
 
           <div class="panel">
-            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3></div><button id="tbAddBlock">+ Add section</button></div>
+            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3><p class="muted">Each section has a specific job. Open a section to see when to use it, what content belongs there, and how it behaves on mobile.</p></div><button id="tbAddBlock">+ Add section</button></div>
             <div id="tbBlocks" class="builder-blocks"></div>
           </div>
 
@@ -343,7 +343,7 @@
           </div>
 
           <div class="panel publish-dock">
-            <div><span class="studio-kicker">PUBLISH</span><h3>Send this design to WordPress</h3><p id="tbPublishState" class="muted">Nothing is changed on WordPress until you press Publish template.</p></div>
+            <div><span class="studio-kicker">PUBLISH</span><h3>Send this design to WordPress</h3><p id="tbPublishState" class="muted">Preview first, then publish when the destination and mobile layout look right. Nothing changes on WordPress until you press Publish template.</p></div>
             <div class="row wrap"><button id="tbPreviewFull">Open large preview</button><button id="tbPublish" class="primary">Publish template</button></div>
           </div>
         </div>

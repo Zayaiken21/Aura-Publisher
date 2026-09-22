@@ -1,3 +1,16 @@
+# Aura Publisher Pro V16.1 — Mobile Studio Polish
+
+V16.1 fixes mobile containment, removes the floating/sticky publish panel on phones, decodes WordPress category names correctly, removes redundant “Category ·” labels, and upgrades the Template Studio section guidance and live template styling.
+
+## V16.1 fixes
+- WordPress category names display exactly as WordPress returns them after HTML-entity decoding (for example, “Family & Parenting”, never “Family &amp; Parenting”).
+- Mobile publish controls stay in their own document flow and no longer cover the next panel.
+- Long text, buttons, labels, URLs, cards and select values are constrained to the viewport.
+- The editor explains what every section type is for and how to format its content.
+- Template previews now use richer editorial card treatments, section kickers, feature panels, rankings and conversion CTAs.
+- Card items support `Title | URL | optional description` or `Title | description` for more useful custom formatting.
+- Aura Site Bridge V1.2.0 carries the matching live WordPress styles.
+
 # Aura Publisher Pro V16 — WordPress Site Studio
 
 V16 rebuilds the WordPress Template Studio, bridge handshake, responsive app shell, SEO controls and installable app branding.
