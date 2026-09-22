@@ -8,8 +8,8 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '6.0.0';
-const PROTOCOL = 'aura-13';
+const API_VERSION = '7.0.0';
+const PROTOCOL = 'aura-14';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -1088,7 +1088,7 @@ async function uploadMedia(w, file, meta) {
 }
 
 // ---------- routes ----------
-const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
+const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { templateStudio: true, resourceUploads: true, imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
 app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V13 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
@@ -1103,6 +1103,77 @@ app.post('/api/wp/test', async (req, res) => {
     res.json({ ok: true, site: d.site, restRoot: d.root, user: { id: me.id, name: me.name, slug: me.slug, roles: me.roles || [] },
       canPublish: !!caps.publish_posts, canUpload: !!caps.upload_files, unfilteredHtml: !!caps.unfiltered_html });
   } catch (e) { res.status(400).json(wpError(e)); }
+});
+
+
+// ---------- V14 Site Studio: WordPress structure + direct template publishing ----------
+app.post('/api/wp/structure', async (req, res) => {
+  try {
+    const w = req.body.wordpress || {};
+    const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
+    const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,name,roles,capabilities');
+    const [categories, pages, posts] = await Promise.all([
+      wpFetch(creds, 'categories?per_page=100&orderby=name&order=asc&_fields=id,name,slug,parent,count,description').catch(() => []),
+      wpFetch(creds, 'pages?per_page=100&status=publish,draft,pending,private&orderby=title&order=asc&context=edit&_fields=id,title,slug,status,link').catch(() => []),
+      wpFetch(creds, 'posts?per_page=50&status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_fields=id,title,slug,status,link').catch(() => [])
+    ]);
+    res.json({ ok: true, site: d.site, user: { id: me.id, name: me.name, roles: me.roles || [] }, capabilities: me.capabilities || {}, categories, pages, posts,
+      support: { categoryDescription: true, fullArchiveReplacement: false, note: 'Aura can update rich category archive content through the category description. Whether it spans the full archive layout depends on the active theme.' } });
+  } catch (e) { res.status(400).json(wpError(e)); }
+});
+
+app.post('/api/wp/template/publish', async (req, res) => {
+  try {
+    const w = req.body.wordpress || {}, t = req.body.template || {};
+    if (!w.url || !w.username || !w.appPassword) return res.status(400).json({ error: 'Connect WordPress first.' });
+    const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
+    const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,capabilities');
+    const type = ['category','page','resource','post'].includes(t.destination) ? t.destination : 'page';
+    const status = ['draft','publish','pending','private'].includes(t.status) ? t.status : 'draft';
+    const html = String(t.html || '').trim();
+    if (!html) return res.status(422).json({ error: 'Template content is empty.' });
+    if (['publish','private'].includes(status) && me.capabilities && !me.capabilities.publish_posts && type !== 'category') return res.status(403).json({ error: 'This WordPress user cannot publish live content.' });
+
+    if (type === 'category') {
+      const id = Number(t.targetId);
+      if (!id) return res.status(422).json({ error: 'Choose a WordPress category.' });
+      const out = await wpFetch(creds, `categories/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: html }) });
+      return res.json({ ok: true, destination: 'category', id: out.id, name: decodeEntities(out.name), link: `${d.site}/category/${out.slug}/`, status: 'updated', note: 'Category archive description updated. The active theme controls exactly where archive descriptions render.' });
+    }
+
+    const endpoint = type === 'page' ? 'pages' : 'posts';
+    let target = Number(t.targetId) || null;
+    const title = String(t.title || t.name || 'Aura Template').trim();
+    const wantedSlug = slug(t.slug || title);
+    if (!target && wantedSlug) {
+      const found = await wpFetch(creds, `${endpoint}?slug=${encodeURIComponent(wantedSlug)}&status=publish,draft,pending,private&context=edit&_fields=id`);
+      if (Array.isArray(found) && found[0]) target = found[0].id;
+    }
+    const body = { title, slug: wantedSlug, content: html, status, excerpt: String(t.excerpt || '').slice(0, 500) };
+    if (endpoint === 'posts') {
+      let catId = Number(t.categoryId) || 0;
+      if (!catId && type === 'resource') catId = await termId(creds, 'categories', 'Resources', new Map());
+      if (catId) body.categories = [catId];
+    }
+    const out = await wpFetch(creds, target ? `${endpoint}/${target}` : endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    res.json({ ok: true, destination: type, id: out.id, link: out.link, status: out.status, updated: !!target });
+  } catch (e) { const o = wpError(e); res.status(o.status === 401 ? 401 : 400).json(o); }
+});
+
+app.post('/api/wp/resource/upload', upload.single('file'), async (req, res) => {
+  try {
+    const w = readJson(req.body.wordpress), meta = readJson(req.body.meta);
+    if (!req.file) return res.status(422).json({ error: 'Choose a resource file.' });
+    const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
+    const name = asciiName(req.file.originalname);
+    const media = await wpFetch(creds, 'media', { method: 'POST', timeout: 120000, headers: { 'Content-Type': req.file.mimetype || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"` }, body: req.file.buffer });
+    const title = String(meta.title || name.replace(/\.[^.]+$/, '')).trim();
+    const description = String(meta.description || '').trim();
+    const catId = Number(meta.categoryId) || await termId(creds, 'categories', 'Resources', new Map());
+    const html = `<div class="aura-resource" style="max-width:900px;margin:0 auto;padding:48px 24px;font-family:Arial,sans-serif;color:#162033"><p style="font-weight:700;letter-spacing:.12em;color:#2378d2;font-size:12px">FREE RESOURCE</p><h1 style="font-size:clamp(34px,5vw,62px);line-height:1.05;margin:10px 0 18px">${esc(title)}</h1><p style="font-size:19px;line-height:1.7;color:#536174;max-width:700px">${esc(description || 'A free Mindful Adaption resource designed to make the next step simpler.')}</p><p style="margin-top:30px"><a href="${esc(media.source_url)}" style="display:inline-block;background:#126dcc;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:999px">Download free resource</a></p><p style="margin-top:28px;font-size:13px;color:#7b8798">File: ${esc(name)}</p></div>`;
+    const post = await wpFetch(creds, 'posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, slug: slug(title), content: html, excerpt: description.slice(0, 400), status: ['publish','draft','pending','private'].includes(meta.status) ? meta.status : 'draft', categories: catId ? [catId] : [] }) });
+    res.json({ ok: true, media: { id: media.id, url: media.source_url, name }, post: { id: post.id, link: post.link, status: post.status } });
+  } catch (e) { const o = wpError(e); res.status(o.status === 401 ? 401 : 400).json(o); }
 });
 
 app.post('/api/import', upload.array('files', 200), async (req, res) => {

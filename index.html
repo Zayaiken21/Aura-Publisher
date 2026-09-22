@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
-<title>Aura Publisher Pro</title>
+<title>Aura Publisher Pro — Template Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=13.0.0">
+<link rel="icon" href="aura-icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=14.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -15,7 +16,7 @@
 <!-- ============ LOCK SCREEN ============ -->
 <section id="lock" class="lock">
   <div class="lock-card">
-    <div class="brand big"><span class="mark">⚡</span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="brand big"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 64 64"><path class="ic-book" d="M8 15c10-3 18-1 24 4v33c-6-5-14-7-24-4V15Zm48 0c-10-3-18-1-24 4v33c6-5 14-7 24-4V15Z"/><path class="ic-cross" d="M29 5h6v12h9v6h-9v12h-6V23h-9v-6h9V5Z"/><path class="ic-bolt" d="m39 22-10 17h7l-5 16 15-22h-8l1-11Z"/></svg></span>Aura<span class="sub">Publisher Pro</span></div>
     <div class="seg" role="tablist">
       <button type="button" data-lock="unlock" class="on">Unlock</button>
       <button type="button" data-lock="create">Create account</button>
@@ -66,7 +67,7 @@
 <!-- ============ APP ============ -->
 <div id="app" hidden>
   <header class="top">
-    <div class="brand"><span class="mark">⚡</span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 64 64"><path class="ic-book" d="M8 15c10-3 18-1 24 4v33c-6-5-14-7-24-4V15Zm48 0c-10-3-18-1-24 4v33c6-5 14-7 24-4V15Z"/><path class="ic-cross" d="M29 5h6v12h9v6h-9v12h-6V23h-9v-6h9V5Z"/><path class="ic-bolt" d="m39 22-10 17h7l-5 16 15-22h-8l1-11Z"/></svg></span>Aura<span class="sub">Publisher Pro</span></div>
     <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm">Sign out</button></div>
   </header>
 
@@ -75,6 +76,7 @@
     <button data-tab="import"><i>📦</i><span><b>Import</b><small>ZIP, JSON, DOCX, PDF</small></span></button>
     <button data-tab="standard"><i>🧭</i><span><b>Standard &amp; ads</b><small id="tdStandard">Layout, alt text, ads</small></span></button>
     <button data-tab="prompt"><i>✨</i><span><b>ChatGPT prompt</b><small id="tdPrompt">Build post packages</small></span></button>
+    <button data-tab="builder"><i>⚡</i><span><b>Template Studio</b><small id="tdBuilder">Category pages &amp; resources</small></span></button>
     <button data-tab="settings"><i>🔗</i><span><b>Connections</b><small id="tdConn">WordPress not added</small></span></button>
     <button data-tab="account"><i>🔐</i><span><b>Account</b><small id="tdAcct">Password, backup</small></span></button>
   </nav>
@@ -238,6 +240,83 @@
       </div>
     </section>
 
+    <!-- TEMPLATE STUDIO -->
+    <section id="builder" class="tab">
+      <div class="studio-head panel">
+        <div>
+          <span class="studio-kicker">AURA SITE STUDIO</span>
+          <h2>WordPress Template Builder</h2>
+          <p class="muted">Design category landing content, pages, resource hubs and special post formats independently from the publishing queue. Save unlimited variations and send the finished layout directly to WordPress.</p>
+        </div>
+        <div class="row wrap studio-actions">
+          <button id="tbNew">New template</button><button id="tbDuplicate">Duplicate</button><button id="tbSave" class="primary">Save template</button>
+        </div>
+      </div>
+
+      <div class="studio-shell">
+        <aside class="studio-side panel">
+          <div class="row between"><h3>Saved</h3><span class="micro-pill" id="tbSavedCount">0</span></div>
+          <div id="tbSaved" class="template-saved"></div>
+          <h3 class="mt">Ready-made starts</h3>
+          <div id="tbPresets" class="preset-stack"></div>
+        </aside>
+
+        <div class="studio-main">
+          <div class="panel">
+            <div class="row between wrap"><div><span class="studio-kicker">DESTINATION</span><h3>Where should this go?</h3></div><button id="tbRefreshWp" class="ghost sm">↻ Refresh WordPress</button></div>
+            <div class="grid3">
+              <label>Content type<select id="tbDestination"><option value="category">Category archive content</option><option value="page">WordPress page</option><option value="resource">Resource / free guide post</option><option value="post">Special blog post</option></select></label>
+              <label>WordPress location<select id="tbTarget"><option value="">Refresh WordPress first</option></select></label>
+              <label>Status<select id="tbStatus"><option value="publish">Publish live</option><option value="draft">Draft</option><option value="pending">Pending review</option><option value="private">Private</option></select></label>
+            </div>
+            <p class="hint" id="tbDestHint">Category archive content updates the category description area. Full archive replacement depends on the active WordPress theme; Aura shows what your site supports before publishing.</p>
+          </div>
+
+          <div class="panel">
+            <div class="row between wrap"><div><span class="studio-kicker">DESIGN</span><h3>Identity &amp; layout</h3></div><span class="micro-pill">Live preview</span></div>
+            <div class="grid2">
+              <label>Template name<input id="tbName" placeholder="Gardening — Garden Journal"></label>
+              <label>Layout<select id="tbVariant"><option value="editorial">Editorial magazine</option><option value="cards">Modern card grid</option><option value="calm">Calm spacious</option><option value="bold">Bold feature-led</option></select></label>
+              <label>Eyebrow / kicker<input id="tbEyebrow" placeholder="GARDENING"></label>
+              <label>Page heading<input id="tbTitle" placeholder="Grow something beautiful, wherever you live."></label>
+              <label class="span2">Intro<textarea id="tbIntro" rows="3" placeholder="Practical guides for beginners, small spaces, seasonal planting and outdoor living."></textarea></label>
+              <label>Hero image URL<input id="tbHero" inputmode="url" placeholder="https://..."></label>
+              <label>Accent<select id="tbAccent"><option value="#2d7d55">Garden green</option><option value="#2378d2">Aura blue</option><option value="#9b6a3b">Warm earth</option><option value="#7b61a8">Wellness lavender</option><option value="#c05b68">Family rose</option><option value="#152e4d">Career navy</option></select></label>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3></div><button id="tbAddBlock">+ Add section</button></div>
+            <div id="tbBlocks" class="builder-blocks"></div>
+          </div>
+
+          <div class="panel resource-lab">
+            <div class="row between wrap"><div><span class="studio-kicker">FREE RESOURCE LAB</span><h3>Ready-to-go guides &amp; downloads</h3></div><span class="micro-pill">10 starters included</span></div>
+            <p class="muted">Drop one of these into the template, or publish a downloadable PDF/DOCX/ZIP as its own resource post with a branded landing section.</p>
+            <div id="tbResourceSeeds" class="resource-seeds"></div>
+            <details class="sub"><summary>Upload a resource file to WordPress</summary>
+              <div class="grid2">
+                <label>Resource title<input id="tbResourceTitle" placeholder="Beginner Garden Checklist"></label>
+                <label>File<input id="tbResourceFile" type="file" accept=".pdf,.doc,.docx,.zip,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"></label>
+              </div>
+              <label>Short description<textarea id="tbResourceDesc" rows="2" placeholder="A printable checklist that helps first-time gardeners plan, plant and maintain a simple garden."></textarea></label>
+              <div class="row wrap"><button id="tbUploadResource" class="primary">Upload &amp; create resource post</button><span id="tbResourceState" class="muted"></span></div>
+            </details>
+          </div>
+
+          <div class="panel publish-dock">
+            <div><span class="studio-kicker">PUBLISH</span><h3>Send this design to WordPress</h3><p id="tbPublishState" class="muted">Nothing is changed on WordPress until you press Publish template.</p></div>
+            <div class="row wrap"><button id="tbPreviewFull">Open large preview</button><button id="tbPublish" class="primary">Publish template</button></div>
+          </div>
+        </div>
+
+        <aside class="studio-preview panel">
+          <div class="row between"><div><span class="studio-kicker">PREVIEW</span><h3 id="tbPreviewLabel">Desktop</h3></div><div class="seg mini"><button id="tbDesk" class="on">▭</button><button id="tbPhone">▯</button></div></div>
+          <div class="device-frame"><iframe id="tbPreview" title="Template preview"></iframe></div>
+        </aside>
+      </div>
+    </section>
+
     <!-- CONNECTIONS -->
     <section id="settings" class="tab">
       <div class="grid2">
@@ -304,9 +383,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=13.0.0"></script>
-<script src="aura-vault.js?v=13.0.0"></script>
-<script src="aura-prompt.js?v=13.0.0"></script>
-<script src="aura-v13.js?v=13.0.0"></script>
+<script src="config.js?v=14.0.0"></script>
+<script src="aura-vault.js?v=14.0.0"></script>
+<script src="aura-prompt.js?v=14.0.0"></script>
+<script src="aura-v13.js?v=14.0.0"></script>
 </body>
 </html>

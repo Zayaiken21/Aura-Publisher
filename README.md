@@ -1,3 +1,19 @@
+# Aura Publisher Pro v14
+
+## New in v14 — Site Studio
+- Separate WordPress Template Studio; the existing post queue is unchanged.
+- Category archive content, WordPress page, special post and resource-post destinations.
+- Seven Mindful Adaption category/page presets plus custom blocks and saved variations.
+- WordPress site structure browser for categories, pages and recent posts.
+- Resource Lab with 10 ready-to-go free-resource starters.
+- Direct PDF/DOCX/ZIP/etc. resource upload that creates a WordPress resource post with a download button.
+- Responsive desktop/mobile live preview.
+- New blue lightning-cross + journal SVG app icon and in-app mark.
+- Builder projects are stored in IndexedDB alongside the workspace, not localStorage.
+
+## Important WordPress note
+WordPress exposes category descriptions through the core REST API, so Aura can publish rich category landing content there. Whether that content replaces the *entire* archive template depends on the active WordPress theme. Page/post/resource destinations are fully controlled by Aura.
+
 # Aura Publisher Pro V13
 
 V13 is the large-batch publishing build.
