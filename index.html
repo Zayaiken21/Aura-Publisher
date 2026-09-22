@@ -4,11 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
-<title>Aura Publisher Pro — Template Studio</title>
+<title>Aura Publisher Pro — WordPress Site Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" href="aura-icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="styles.css?v=14.0.0">
+<link rel="apple-touch-icon" href="mindful-adaption-logo.jpg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles.css?v=15.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -16,7 +18,7 @@
 <!-- ============ LOCK SCREEN ============ -->
 <section id="lock" class="lock">
   <div class="lock-card">
-    <div class="brand big"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 64 64"><path class="ic-book" d="M8 15c10-3 18-1 24 4v33c-6-5-14-7-24-4V15Zm48 0c-10-3-18-1-24 4v33c6-5 14-7 24-4V15Z"/><path class="ic-cross" d="M29 5h6v12h9v6h-9v12h-6V23h-9v-6h9V5Z"/><path class="ic-bolt" d="m39 22-10 17h7l-5 16 15-22h-8l1-11Z"/></svg></span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="brand big"><span class="brand-photo" aria-hidden="true"><img src="mindful-adaption-logo.jpg" alt=""><i>✝</i></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>Mindful Adaption WordPress Studio</small></span></div>
     <div class="seg" role="tablist">
       <button type="button" data-lock="unlock" class="on">Unlock</button>
       <button type="button" data-lock="create">Create account</button>
@@ -67,7 +69,7 @@
 <!-- ============ APP ============ -->
 <div id="app" hidden>
   <header class="top">
-    <div class="brand"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 64 64"><path class="ic-book" d="M8 15c10-3 18-1 24 4v33c-6-5-14-7-24-4V15Zm48 0c-10-3-18-1-24 4v33c6-5 14-7 24-4V15Z"/><path class="ic-cross" d="M29 5h6v12h9v6h-9v12h-6V23h-9v-6h9V5Z"/><path class="ic-bolt" d="m39 22-10 17h7l-5 16 15-22h-8l1-11Z"/></svg></span>Aura<span class="sub">Publisher Pro</span></div>
+    <div class="brand"><span class="brand-photo" aria-hidden="true"><img src="mindful-adaption-logo.jpg" alt=""><i>✝</i></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Studio</small></span></div>
     <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm">Sign out</button></div>
   </header>
 
@@ -253,6 +255,10 @@
         </div>
       </div>
 
+      <div class="panel bridge-panel" id="tbBridgePanel">
+        <div class="bridge-copy"><span class="studio-kicker">WORDPRESS POWER LAYER</span><h3>Aura Site Bridge</h3><p class="muted" id="tbBridgeText">Refresh WordPress to check the bridge. The bridge keeps template CSS out of category descriptions and enables full archive takeovers, affiliate sidebars and live diagnostics.</p></div>
+        <div class="bridge-actions"><span class="bridge-status" id="tbBridgeStatus">Not checked</span><a class="button-like primary" href="aura-wordpress-bridge.zip" download>Download WordPress plugin</a><button id="tbBridgeCheck">Check bridge</button></div>
+      </div>
       <div class="studio-shell">
         <aside class="studio-side panel">
           <div class="row between"><h3>Saved</h3><span class="micro-pill" id="tbSavedCount">0</span></div>
@@ -269,7 +275,12 @@
               <label>WordPress location<select id="tbTarget"><option value="">Refresh WordPress first</option></select></label>
               <label>Status<select id="tbStatus"><option value="publish">Publish live</option><option value="draft">Draft</option><option value="pending">Pending review</option><option value="private">Private</option></select></label>
             </div>
-            <p class="hint" id="tbDestHint">Category archive content updates the category description area. Full archive replacement depends on the active WordPress theme; Aura shows what your site supports before publishing.</p>
+            <p class="hint" id="tbDestHint">Install Aura Site Bridge for a full archive takeover without raw CSS appearing in WordPress content.</p>
+            <div class="grid3 studio-options">
+              <label>Category takeover<select id="tbArchiveMode"><option value="full">Full Aura archive</option><option value="header">Aura header + theme posts</option></select></label>
+              <label>Live WordPress posts<select id="tbNativePosts"><option value="yes">Show latest category posts</option><option value="no">Template sections only</option></select></label>
+              <label>Preview device<select id="tbPreviewDevice"><option value="desktop">Desktop 1440</option><option value="tablet">Tablet 820</option><option value="mobile">Mobile 390</option></select></label>
+            </div>
           </div>
 
           <div class="panel">
@@ -288,6 +299,12 @@
           <div class="panel">
             <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3></div><button id="tbAddBlock">+ Add section</button></div>
             <div id="tbBlocks" class="builder-blocks"></div>
+          </div>
+
+          <div class="panel affiliate-lab">
+            <div class="row between wrap"><div><span class="studio-kicker">AFFILIATE CONVERSION LAYER</span><h3>Sticky side recommendations</h3></div><div class="row wrap"><button id="tbImportAffiliates">Import affiliate library</button><button id="tbAddAffiliate">+ Add affiliate card</button></div></div>
+            <p class="muted">Desktop and tablet use a sticky recommendation rail. On mobile the same cards move into the article flow automatically. Links publish with sponsored/nofollow attributes through Aura Site Bridge.</p>
+            <div id="tbAffiliates" class="affiliate-builder"></div>
           </div>
 
           <div class="panel resource-lab">
@@ -311,7 +328,7 @@
         </div>
 
         <aside class="studio-preview panel">
-          <div class="row between"><div><span class="studio-kicker">PREVIEW</span><h3 id="tbPreviewLabel">Desktop</h3></div><div class="seg mini"><button id="tbDesk" class="on">▭</button><button id="tbPhone">▯</button></div></div>
+          <div class="row between"><div><span class="studio-kicker">PREVIEW</span><h3 id="tbPreviewLabel">Desktop</h3></div><div class="seg mini"><button id="tbDesk" class="on" title="Desktop">▭</button><button id="tbTablet" title="Tablet">▥</button><button id="tbPhone" title="Mobile">▯</button></div></div>
           <div class="device-frame"><iframe id="tbPreview" title="Template preview"></iframe></div>
         </aside>
       </div>
@@ -383,9 +400,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=14.0.0"></script>
-<script src="aura-vault.js?v=14.0.0"></script>
-<script src="aura-prompt.js?v=14.0.0"></script>
-<script src="aura-v13.js?v=14.0.0"></script>
+<script src="config.js?v=15.0.0"></script>
+<script src="aura-vault.js?v=15.0.0"></script>
+<script src="aura-prompt.js?v=15.0.0"></script>
+<script src="aura-v13.js?v=15.0.0"></script>
 </body>
 </html>

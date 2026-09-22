@@ -1,50 +1,55 @@
-# Aura Publisher Pro v14
+# Aura Publisher Pro v15 — WordPress Site Studio
 
-## New in v14 — Site Studio
-- Separate WordPress Template Studio; the existing post queue is unchanged.
-- Category archive content, WordPress page, special post and resource-post destinations.
-- Seven Mindful Adaption category/page presets plus custom blocks and saved variations.
-- WordPress site structure browser for categories, pages and recent posts.
-- Resource Lab with 10 ready-to-go free-resource starters.
-- Direct PDF/DOCX/ZIP/etc. resource upload that creates a WordPress resource post with a download button.
-- Responsive desktop/mobile live preview.
-- New blue lightning-cross + journal SVG app icon and in-app mark.
-- Builder projects are stored in IndexedDB alongside the workspace, not localStorage.
+## The raw-CSS/category-template fix
+V14 tried to place a `<style>` block inside the WordPress category description. Many WordPress themes/security filters strip the `<style>` tag while leaving its CSS text behind, which is why the Gardening archive could visibly print `.aura-site-template{...}` instead of adopting the design. V15 no longer publishes category CSS into category content.
 
-## Important WordPress note
-WordPress exposes category descriptions through the core REST API, so Aura can publish rich category landing content there. Whether that content replaces the *entire* archive template depends on the active WordPress theme. Page/post/resource destinations are fully controlled by Aura.
+## Aura Site Bridge (included)
+The root of this package contains `aura-wordpress-bridge.zip`. Install it once in WordPress under **Plugins → Add New → Upload Plugin → Activate**. Then open Aura → Template Studio → **Refresh WordPress**. The status should read **Active**.
 
-# Aura Publisher Pro V13
+The bridge adds:
+- Full category archive takeovers while preserving the WordPress header/footer.
+- A safer “Aura header + theme posts” mode.
+- Dedicated responsive CSS loaded as a real WordPress stylesheet, never pasted into category text.
+- Automatic cleanup of the old raw CSS category description when a V15 category template is published.
+- Sticky side affiliate cards on desktop/tablet that become inline cards on mobile.
+- `rel="sponsored nofollow noopener"` on affiliate links.
+- Live WordPress/PHP/theme diagnostics through the authenticated REST API.
+- Responsive styling for Aura resource posts and resource hubs.
 
-V13 is the large-batch publishing build.
+## Template Studio improvements
+- Desktop 1440, tablet 820 and mobile 390 previews.
+- Full archive vs header-only category modes.
+- Toggle to include the live category post grid below the custom editorial sections.
+- Affiliate conversion layer with label, title, description, image, URL, CTA and disclosure fields.
+- Section items can now be made clickable with `Title | https://destination.com`.
+- CTA and feature sections have their own destination URL.
+- WordPress category presets still map to the Mindful Adaption slugs.
+- Resources preset can update a matching Resources page and uses the WordPress Bridge stylesheet.
 
-## What changed
-- Queue metadata moved from `localStorage` to IndexedDB, removing the small localStorage quota that caused **“Browser storage is full”** on large article runs.
-- Existing V11/V12 local queues migrate automatically the first time the user signs in.
-- Images remain in IndexedDB only until WordPress confirms its media IDs. Aura then releases the local image blobs automatically while keeping the WordPress media map, so published batches do not continuously consume browser storage.
-- Published WordPress media counts as available during later validation, so automatic cleanup does not make a published post look broken.
-- `Clear all` removes queue metadata and local photo cache without touching WordPress.
-- The prompt planner supports up to 1,000 planned posts and up to 10 posts per AI batch. Large runs are automatically split into numbered batches.
-- Prompt V6 has a strict anti-template differentiation gate, mandatory `article-1` and `article-2` ad slots, affiliate safety rules, unique photo direction, and an SEO contract.
-- Aura's standardizer still repairs missing ad/image/checklist/takeaway slots and audits SEO on import. “SEO 100” is treated as completion of Aura's technical/content checklist, not a guarantee of search-engine rankings.
+## Branding
+The supplied Mindful Adaption artwork is included as `mindful-adaption-logo.jpg` and is used in the Aura app header/lock screen with an added cross badge. `aura-icon.svg` remains the lightweight installable web-app icon (journal + cross + blue lightning).
+
+## Mobile/device work
+- Template Studio collapses to one column on narrower screens.
+- Bridge controls and affiliate controls become full-width touch targets.
+- Preview supports desktop/tablet/mobile widths.
+- Sticky affiliate rails automatically become normal inline content on smaller screens.
+- Inputs remain 16px on iPhone to avoid focus zoom/layout drift.
 
 ## Deploy
-GitHub Pages: upload all files in this ZIP to the repository root. `index.html` must stay at root.
+### Front end / GitHub Pages
+Upload the root files to the repository root. `index.html`, `config.js`, `aura-wordpress-bridge.zip`, `mindful-adaption-logo.jpg` and `manifest.webmanifest` should remain alongside the JS/CSS files.
 
-Render:
+### Aura engine / Render
 - Build: `npm install`
 - Start: `npm start`
 - Health: `/healthz`
-- `ALLOWED_ORIGINS=https://zayaiken21.github.io`
+- Set `ALLOWED_ORIGINS` to the URL that hosts the front end.
 
-After deploy, **Test Engine** should show API `6.0.0`.
-
-## Recommended workflow
-1. Open **Prompt**, paste any number of story ideas, and choose an AI batch size (3 is a strong default; up to 10 is supported).
-2. Copy the generated batch prompt into ChatGPT.
-3. Import each returned ZIP into Aura.
-4. Aura normalizes structure, audits/repairs SEO metadata, guarantees ad slots, matches/generates photos, and validates each post.
-5. Preview and publish/schedule.
-6. After WordPress confirms media, Aura automatically frees those local image blobs.
-
-The standalone `AURA-MASTER-PROMPT-V6.md` is also included for use outside the app.
+## Recommended WordPress workflow
+1. Install and activate `aura-wordpress-bridge.zip`.
+2. In Aura, connect WordPress using an Application Password.
+3. Open Template Studio and refresh WordPress. Confirm **Aura Site Bridge: Active**.
+4. Load a category preset, select the correct WordPress category, choose Full Aura Archive, preview desktop/tablet/mobile, then publish.
+5. For the Resources hub, load the Resources preset, choose the existing Resources page, add your real resource URLs and affiliate cards, then publish.
+6. Keep affiliate disclosures accurate and only link products/services that genuinely fit the page.

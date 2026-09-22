@@ -1,0 +1,9 @@
+{
+  "name": "Aura Publisher Pro — Mindful Adaption WordPress Studio",
+  "short_name": "Aura Publisher",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#020a18",
+  "theme_color": "#086dff",
+  "icons": [{"src":"aura-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
