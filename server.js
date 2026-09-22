@@ -9,7 +9,7 @@ import multer from 'multer';
 import AdmZip from 'adm-zip';
 
 const API_VERSION = '7.0.0';
-const PROTOCOL = 'aura-15';
+const PROTOCOL = 'aura-16';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -1111,7 +1111,7 @@ async function uploadMedia(w, file, meta) {
 
 // ---------- routes ----------
 const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { templateStudio: true, wordpressBridge: true, resourceUploads: true, imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
-app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V15 (API ${API_VERSION})</p>`));
+app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V16 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
 
@@ -1140,7 +1140,7 @@ app.post('/api/wp/structure', async (req, res) => {
       wpFetch(creds, 'posts?per_page=50&status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_fields=id,title,slug,status,link').catch(() => [])
     ]);
     let bridge = null;
-    try { bridge = await wpFetchNs(creds, 'aura/v1', 'status'); } catch {}
+    try { bridge = await wpFetchNs(creds, 'aura/v1', 'ping'); } catch { try { bridge = await wpFetchNs(creds, 'aura/v1', 'status'); } catch {} }
     res.json({ ok: true, site: d.site, user: { id: me.id, name: me.name, roles: me.roles || [] }, capabilities: me.capabilities || {}, categories, pages, posts,
       bridge: bridge ? { installed: true, ...bridge } : { installed: false },
       support: bridge?.capabilities?.category_takeover
@@ -1153,7 +1153,7 @@ app.post('/api/wp/structure', async (req, res) => {
 app.post('/api/wp/bridge/status', async (req, res) => {
   try {
     const w=req.body.wordpress||{}; const d=await discoverWp(w), creds={...w,url:d.site,restRoot:d.root};
-    const status=await wpFetchNs(creds,'aura/v1','status');
+    let status; try{status=await wpFetchNs(creds,'aura/v1','ping');}catch{status=await wpFetchNs(creds,'aura/v1','status');}
     let diagnostics=null; try{diagnostics=await wpFetchNs(creds,'aura/v1','diagnostics')}catch{}
     res.json({ok:true,status,diagnostics});
   } catch(e){ const o=wpError(e); if(e.status===404 || e.wpCode==='rest_no_route') return res.status(404).json({error:'Aura Site Bridge is not installed or not active.',code:'bridge_missing'}); res.status(400).json(o); }
@@ -1174,7 +1174,7 @@ app.post('/api/wp/template/publish', async (req, res) => {
       try {
         const payload = {
           name:t.name||'', eyebrow:t.eyebrow||'', title:t.title||t.name||'', intro:t.intro||'', hero:t.hero||'', accent:t.accent||'#2378d2', variant:t.variant||'editorial', mode:t.archiveMode||'full',
-          blocks:Array.isArray(t.blocks)?t.blocks:[], affiliates:Array.isArray(t.affiliates)?t.affiliates:[], showNativePosts:t.showNativePosts!==false
+          blocks:Array.isArray(t.blocks)?t.blocks:[], affiliates:Array.isArray(t.affiliates)?t.affiliates:[], showNativePosts:t.showNativePosts!==false, contentWidth:t.contentWidth||'1180', density:t.density||'balanced', radius:t.radius||'20', fontPair:t.fontPair||'modern', seo:t.seo||{}
         };
         const out = await wpFetchNs(creds,'aura/v1',`category/${id}/template`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         return res.json({ok:true,destination:'category',id,link:out.link,status:'updated',bridge:true,note:'Full category template published through Aura Site Bridge. Styles stay in the plugin, so WordPress cannot print them as raw text.'});
@@ -1191,7 +1191,8 @@ app.post('/api/wp/template/publish', async (req, res) => {
     const body = { title, slug: wantedSlug, content: html, status, excerpt: String(t.excerpt || '').slice(0, 500) };
     if (endpoint === 'posts') { let catId = Number(t.categoryId) || 0; if (!catId && type === 'resource') catId = await termId(creds, 'categories', 'Resources', new Map()); if (catId) body.categories = [catId]; }
     const out = await wpFetch(creds, target ? `${endpoint}/${target}` : endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    res.json({ ok: true, destination: type, id: out.id, link: out.link, status: out.status, updated: !!target });
+    let seoApplied=false; if(t.seo && Object.values(t.seo).some(Boolean)){ try{await wpFetchNs(creds,'aura/v1',`post/${out.id}/seo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(t.seo)});seoApplied=true;}catch{} }
+    res.json({ ok: true, destination: type, id: out.id, link: out.link, status: out.status, updated: !!target, seoApplied });
   } catch (e) { const o = wpError(e); res.status(o.status === 401 ? 401 : (e.status||400)).json(o); }
 });
 
@@ -1370,4 +1371,4 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req
 app.use((e, q, r, n) => r.status(e.status === 413 || e.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: e.message }));
 
 export { normalizePost, applyStandard, validate, renderPost, planAds, artDirect };
-if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V15 (API ${API_VERSION}) listening on ${PORT}`));
+if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V16 (API ${API_VERSION}) listening on ${PORT}`));

@@ -8,9 +8,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" href="aura-icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="mindful-adaption-logo.jpg">
+<link rel="apple-touch-icon" sizes="180x180" href="aura-icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Aura Publisher">
+<meta name="theme-color" content="#086dff">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="styles.css?v=15.0.0">
+<link rel="stylesheet" href="styles.css?v=16.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -18,7 +20,7 @@
 <!-- ============ LOCK SCREEN ============ -->
 <section id="lock" class="lock">
   <div class="lock-card">
-    <div class="brand big"><span class="brand-photo" aria-hidden="true"><img src="mindful-adaption-logo.jpg" alt=""><i>✝</i></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>Mindful Adaption WordPress Studio</small></span></div>
+    <div class="brand big"><span class="brand-photo" aria-hidden="true"><img src="aura-brand.svg" alt=""></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Publishing &amp; Site Studio</small></span></div>
     <div class="seg" role="tablist">
       <button type="button" data-lock="unlock" class="on">Unlock</button>
       <button type="button" data-lock="create">Create account</button>
@@ -69,8 +71,8 @@
 <!-- ============ APP ============ -->
 <div id="app" hidden>
   <header class="top">
-    <div class="brand"><span class="brand-photo" aria-hidden="true"><img src="mindful-adaption-logo.jpg" alt=""><i>✝</i></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Studio</small></span></div>
-    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm">Sign out</button></div>
+    <div class="brand"><span class="brand-photo" aria-hidden="true"><img src="aura-brand.svg" alt=""></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Studio</small></span></div>
+    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm logout-btn" aria-label="Sign out"><span class="logout-icon">↪</span><span class="logout-text">Sign out</span></button></div>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -248,7 +250,7 @@
         <div>
           <span class="studio-kicker">AURA SITE STUDIO</span>
           <h2>WordPress Template Builder</h2>
-          <p class="muted">Design category landing content, pages, resource hubs and special post formats independently from the publishing queue. Save unlimited variations and send the finished layout directly to WordPress.</p>
+          <p class="muted">Build high-performance WordPress category pages, landing pages, resource hubs and special post formats with responsive formatting, SEO controls, affiliate placements and live device previews — without touching the publishing queue.</p>
         </div>
         <div class="row wrap studio-actions">
           <button id="tbNew">New template</button><button id="tbDuplicate">Duplicate</button><button id="tbSave" class="primary">Save template</button>
@@ -256,7 +258,7 @@
       </div>
 
       <div class="panel bridge-panel" id="tbBridgePanel">
-        <div class="bridge-copy"><span class="studio-kicker">WORDPRESS POWER LAYER</span><h3>Aura Site Bridge</h3><p class="muted" id="tbBridgeText">Refresh WordPress to check the bridge. The bridge keeps template CSS out of category descriptions and enables full archive takeovers, affiliate sidebars and live diagnostics.</p></div>
+        <div class="bridge-copy"><span class="studio-kicker">WORDPRESS POWER LAYER</span><h3>Aura Site Bridge</h3><p class="muted" id="tbBridgeText">Checking the WordPress bridge uses a dedicated handshake, then Aura verifies authenticated publishing permissions separately. This prevents false “plugin required” states.</p></div>
         <div class="bridge-actions"><span class="bridge-status" id="tbBridgeStatus">Not checked</span><a class="button-like primary" href="aura-wordpress-bridge.zip" download>Download WordPress plugin</a><button id="tbBridgeCheck">Check bridge</button></div>
       </div>
       <div class="studio-shell">
@@ -293,7 +295,26 @@
               <label class="span2">Intro<textarea id="tbIntro" rows="3" placeholder="Practical guides for beginners, small spaces, seasonal planting and outdoor living."></textarea></label>
               <label>Hero image URL<input id="tbHero" inputmode="url" placeholder="https://..."></label>
               <label>Accent<select id="tbAccent"><option value="#2d7d55">Garden green</option><option value="#2378d2">Aura blue</option><option value="#9b6a3b">Warm earth</option><option value="#7b61a8">Wellness lavender</option><option value="#c05b68">Family rose</option><option value="#152e4d">Career navy</option></select></label>
+              <label>Content width<select id="tbContentWidth"><option value="1180">Balanced · 1180px</option><option value="1040">Editorial · 1040px</option><option value="1320">Wide · 1320px</option><option value="1440">Full editorial · 1440px</option></select></label>
+              <label>Spacing<select id="tbDensity"><option value="balanced">Balanced</option><option value="compact">Compact</option><option value="airy">Airy</option></select></label>
+              <label>Corner style<select id="tbRadius"><option value="20">Soft · 20px</option><option value="12">Modern · 12px</option><option value="28">Editorial · 28px</option><option value="0">Square</option></select></label>
+              <label>Typography<select id="tbFontPair"><option value="modern">Modern sans</option><option value="editorial">Editorial serif + sans</option><option value="clean">Clean system</option></select></label>
             </div>
+          </div>
+
+          <div class="panel seo-lab">
+            <div class="row between wrap"><div><span class="studio-kicker">SEO &amp; DISCOVERY</span><h3>Search appearance</h3></div><span class="seo-score" id="tbSeoScore">SEO —</span></div>
+            <p class="muted">Control the title, description, canonical URL, social image and schema that Aura sends to WordPress. The score is a live completeness check — not a search-ranking guarantee.</p>
+            <div class="grid2">
+              <label>SEO title<input id="tbSeoTitle" maxlength="70" placeholder="Primary topic | Site name"><small class="hint" id="tbSeoTitleCount">0 / 60 recommended</small></label>
+              <label>Schema<select id="tbSchema"><option value="CollectionPage">Collection page</option><option value="WebPage">Web page</option><option value="Article">Article</option><option value="FAQPage">FAQ page</option></select></label>
+              <label class="span2">Meta description<textarea id="tbMetaDescription" rows="3" maxlength="180" placeholder="A specific, useful summary written for searchers."></textarea><small class="hint" id="tbMetaCount">0 / 160 recommended</small></label>
+              <label>Canonical URL<input id="tbCanonical" inputmode="url" placeholder="https://mindfuladaption.com/..."></label>
+              <label>Social / OG image URL<input id="tbSocialImage" inputmode="url" placeholder="https://..."></label>
+              <label>Indexing<select id="tbRobots"><option value="index,follow">Index, follow</option><option value="noindex,follow">Noindex, follow</option><option value="noindex,nofollow">Noindex, nofollow</option></select></label>
+              <label class="check seo-check"><input type="checkbox" id="tbBreadcrumbs" checked> Add breadcrumb schema when supported</label>
+            </div>
+            <div class="seo-checks" id="tbSeoChecks"></div>
           </div>
 
           <div class="panel">
@@ -400,9 +421,9 @@
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=15.0.0"></script>
-<script src="aura-vault.js?v=15.0.0"></script>
-<script src="aura-prompt.js?v=15.0.0"></script>
-<script src="aura-v13.js?v=15.0.0"></script>
+<script src="config.js?v=16.0.0"></script>
+<script src="aura-vault.js?v=16.0.0"></script>
+<script src="aura-prompt.js?v=16.0.0"></script>
+<script src="aura-v13.js?v=16.0.0"></script>
 </body>
 </html>

@@ -1,9 +1,31 @@
 {
-  "name": "Aura Publisher Pro — Mindful Adaption WordPress Studio",
+  "name": "Aura Publisher Pro",
   "short_name": "Aura Publisher",
+  "description": "WordPress publishing, template, SEO and resource studio.",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#020a18",
   "theme_color": "#086dff",
-  "icons": [{"src":"aura-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons": [
+    {
+      "src": "aura-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "aura-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "aura-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }

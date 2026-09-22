@@ -1,3 +1,29 @@
+# Aura Publisher Pro V16 — WordPress Site Studio
+
+V16 rebuilds the WordPress Template Studio, bridge handshake, responsive app shell, SEO controls and installable app branding.
+
+## Important upgrade step
+Replace the old **Aura Site Bridge** plugin with the included `aura-wordpress-bridge.zip` (V1.1.0), then redeploy the V16 frontend/backend files. The new public `/aura/v1/ping` route fixes false “Plugin required” states while authenticated publish/diagnostic actions remain permission-controlled.
+
+## iPhone / iPad icon
+V16 includes dedicated 180px, 192px and 512px PNG icons plus a vector SVG. iOS caches Home Screen icons aggressively; after deploying V16, remove the old Home Screen bookmark once and add it again to see the new Aura Publisher Pro icon.
+
+## Template Studio
+- category, page, resource and special post destinations
+- full archive takeover or header + theme posts
+- responsive desktop/tablet/mobile preview
+- SEO title, description, canonical, robots, social image and schema controls
+- live SEO completeness audit
+- editorial layout density, content width, radii and typography
+- feature, topics, cards, resources, ranked list, steps, rich text, image, FAQ, newsletter, stats, quote, CTA, divider and spacer sections
+- section background/text color, width/alignment and grid columns
+- affiliate recommendation rail that collapses inline on mobile
+- downloadable resource publishing
+
+The SEO score is a technical/content completeness check; no tool can guarantee a search ranking.
+
+---
+
 # Aura Publisher Pro v15 — WordPress Site Studio
 
 ## The raw-CSS/category-template fix
