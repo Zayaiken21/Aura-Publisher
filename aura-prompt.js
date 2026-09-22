@@ -1,222 +1,50 @@
-// Aura ChatGPT Package Prompt V6 — one ZIP with everything — builds batched prompts that make ChatGPT produce Aura-ready ZIP packages.
-// Unlimited post lists are split into batches ChatGPT can finish in one reply (no truncated JSON, no rate limits).
+// Aura ChatGPT Package Prompt V7 — Originality Engine + WordPress routing.
 (() => {
   const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
   const slug = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60).replace(/-$/, '');
   const adId = a => slug(a.id || a.name || a.label || 'ad');
   const list = v => Array.isArray(v) ? v.map(clean).filter(Boolean) : String(v || '').split(/[,;]/).map(clean).filter(Boolean);
 
-  // "Title | keyword | notes | affiliate ids" — one per line. Bare lines are titles/topics.
   function parseTopics(text) {
     return String(text || '').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => {
       const [topic, keyword, notes, affs] = l.split('|').map(clean);
       return { topic, keyword: keyword || '', notes: notes || '', affiliates: list(affs).map(slug) };
     }).filter(t => t.topic);
   }
-
   function plan(cfg = {}) {
-    const topics = parseTopics(cfg.topics);
-    const size = Math.max(1, Math.min(10, Number(cfg.batchSize) || 3));
-    const total = topics.length || Math.max(1, Math.min(1000, Number(cfg.count) || 5));
-    const batches = [];
+    const topics = parseTopics(cfg.topics), size = Math.max(1, Math.min(10, Number(cfg.batchSize) || 3));
+    const total = topics.length || Math.max(1, Math.min(1000, Number(cfg.count) || 5)), batches = [];
     for (let i = 0; i < total; i += size) batches.push(topics.length ? topics.slice(i, i + size) : Array.from({ length: Math.min(size, total - i) }, () => null));
     return { topics, size, total, batches };
   }
-
   const line = (label, v, fallback) => `- ${label}: ${clean(v) || fallback}`;
-
   function affiliateBlock(ads) {
     const lib = (ads || []).filter(a => a && a.enabled !== false && (a.url || a.html));
-    if (!lib.length) return `No affiliate links are loaded yet. Still write both ad sections with a context-matched "label", "text" and "cta", set "ad_id" to "" and "url" to "" — Aura fills them from its library at publish time. Do not write any aff: links.`;
-    return `These are the ONLY affiliate products/offers available. Refer to them by ID; never invent products, prices, discounts, ratings or claims about them.
-| ID | Product / offer | Fits topics about | Default button |
-|---|---|---|---|
-${lib.map(a => `| ${adId(a)} | ${clean(a.label || a.name)}${a.text ? ` — ${clean(a.text)}` : ''} | ${list(a.keywords).join(', ') || clean(a.category) || 'general'} | ${clean(a.cta) || 'Learn more'} |`).join('\n')}`;
+    if (!lib.length) return `No affiliate links are loaded. Preserve contextual affiliate/ad opportunities, but never invent a product or URL. Aura will populate empty structured slots later.`;
+    return `These are the ONLY affiliate products/offers available. Never invent products, URLs, prices, discounts, ratings or claims.\n| ID | Product / offer | Fits topics about | Default button |\n|---|---|---|---|\n${lib.map(a => `| ${adId(a)} | ${clean(a.label || a.name)}${a.text ? ` — ${clean(a.text)}` : ''} | ${list(a.keywords).join(', ') || clean(a.category) || 'general'} | ${clean(a.cta) || 'Learn more'} |`).join('\n')}`;
+  }
+  function routingBlock(cfg = {}) {
+    const r = cfg.linkRouting || {}, pool = (r.selected || []).filter(x => x && (x.url || x.link));
+    if (!pool.length || r.mode === 'manual') return `Internal-link mode: ${r.mode === 'manual' ? 'MANUAL ONLY. Keep any supplied editorial links, but do not invent WordPress URLs.' : 'SMART. Mark natural internal-link opportunities in the prose, but do not invent URLs; Aura can match them to existing WordPress content at publish time.'}`;
+    return `Internal-link mode: ${String(r.mode || 'smart').toUpperCase()}. Use only destinations from this verified WordPress routing pool. Aim for ${Number(r.linksPerPost) || 3} useful internal links per article when context supports them. ${r.useAll !== false ? 'Across the batch, distribute the selected pool before repeating destinations.' : ''}\n| Type | Destination | URL |\n|---|---|---|\n${pool.map(x => `| ${clean(x.type || 'post')} | ${clean(x.title || x.name)} | ${clean(x.url || x.link)} |`).join('\n')}\nIf a selected destination cannot fit naturally in body prose, place it in the post's \"internal_links\" array so Aura can surface it in a Keep Reading block. Never fabricate a URL.`;
+  }
+  function historyBlock(cfg = {}) {
+    const h = (cfg.editorialHistory || []).filter(Boolean).slice(-250);
+    if (!h.length) return `No earlier editorial-history manifest is available yet. Create distinct fingerprints inside this batch and return each fingerprint as metadata.`;
+    return `Compare every new post against this previous editorial history. Do not recreate recent fingerprints.\n${h.map(x => `- ${clean(x.post_id)} | ${clean(x.topic)} | angle=${clean(x.angle)} | opening=${clean(x.opening_type)} | architecture=${clean(x.architecture)} | action=${clean(x.action_device)} | closing=${clean(x.closing_type)} | image=${clean(x.featured_image_concept)}`).join('\n')}`;
+  }
+  function topicBlock(batch, n) {
+    if (!batch.some(Boolean)) return `Choose ${batch.length} distinct, search-worthy topics inside the niche with real reader intent${n.batchNo > 1 ? ', different from anything already produced in this project' : ''}.`;
+    return `Write exactly these ${batch.length} posts, in this order. Notes are required facts/angles.\n${batch.map((t, i) => `${i + 1}. **${t.topic}**${t.keyword ? ` — primary keyword: \"${t.keyword}\"` : ''}${t.notes ? ` — notes: ${t.notes}` : ''}${t.affiliates.length ? ` — feature affiliate IDs: ${t.affiliates.join(', ')}` : ''}`).join('\n')}`;
   }
 
-  function topicBlock(batch, cfg, n) {
-    if (!batch.some(Boolean)) return `Choose ${batch.length} distinct, search-worthy topic${batch.length > 1 ? 's' : ''} inside the niche with real reader intent${n.batchNo > 1 ? `, different from anything you wrote in earlier batches of this conversation` : ''}.`;
-    return `Write exactly these ${batch.length} post${batch.length > 1 ? 's' : ''}, in this order. Use every detail given; the notes are facts and angles you must include.\n` +
-      batch.map((t, i) => `${i + 1}. **${t.topic}**${t.keyword ? ` — primary keyword: "${t.keyword}"` : ''}${t.notes ? ` — notes: ${t.notes}` : ''}${t.affiliates.length ? ` — feature affiliate IDs: ${t.affiliates.join(', ')}` : ''}`).join('\n');
-  }
+  const ORIGINALITY = `## 4. AURA ORIGINALITY ENGINE — EDITORIAL FINGERPRINT STANDARD\n\nCRITICAL RULE: every article must feel independently commissioned, planned, researched, structured, photographed and edited. Do NOT use a master article template. Do NOT create one successful structure and reuse it with different topics. Do NOT merely vary wording. STRUCTURAL ORIGINALITY is required.\n\nBefore every article, privately design its own EDITORIAL FINGERPRINT. Never print the private planning process. Determine: exact reader situation; reader knowledge level; dominant search intent; article promise; editorial angle; emotional tone; opening mechanism; narrative perspective; pacing; section architecture; number of H2s; whether H3s help; explanation style; example style; practical device; visual storytelling approach; checklist/action format if appropriate; FAQ strategy if appropriate; closing mechanism; featured-photo composition; inline-photo concepts.\n\nThere is NO universal article skeleton. Never automatically write Introduction → What Is X → Why X Matters → Benefits → How To → Common Mistakes → Tips → Checklist → FAQ → Conclusion. Build the architecture FROM THE TOPIC. A tutorial, troubleshooting article, transformation story, comparison, seasonal guide, mistake-prevention article, routine, planning guide, decision guide, myth correction, field guide, experiment, weekend project and reflective lifestyle article should not share one outline.\n\nPossible architecture inspirations include scenario→problem→discovery→solution→application; mistake→consequence→diagnosis→correction→prevention; goal→constraints→options→decision→implementation; observation→explanation→example→practice→next step; before→friction→small changes→routine→after; question→investigation→nuance→practical answer; season→priorities→tasks→troubleshooting→preparation; myth→reality→confusion→better approach; objective→materials→process→checkpoints→maintenance. These are inspirations only — never rotate through them mechanically.\n\nOPENINGS: no two posts in a batch may use substantially the same opening technique. Avoid repeated starts such as \"If you've ever\", \"Whether you're\", \"Imagine\", \"When it comes to\", \"Many people\", \"There's something\", \"For many of us\", \"One of the best\", or generic \"Gardening can…\" openings. Open from a physical scene, tiny problem, overlooked detail, decision, unexpected result, practical question, contradiction, seasonal moment, observation, short illustrative narrative, mistake, object, sensory detail, immediate instruction, verified useful fact, or realistic household situation — and invent new mechanisms beyond this list.\n\nRHYTHM: vary paragraph length, sentence length, section depth, explanation density, examples, lists, questions, transitions and practical instruction. Keep the brand voice consistent while each ARTICLE PERSONALITY changes.\n\nHEADINGS: never swap a keyword into reusable formulas like Why ___ Matters, Understanding ___, Benefits of ___, How to Get Started, Common Mistakes to Avoid, Tips for Success, Final Thoughts. Headings should reveal something specific to this article.\n\nEXAMPLES: each article gets its own example bank. Do not recycle the same family, apartment, morning routine, beginner mistake, garden layout, dollar example, weekend project or emotional problem within the batch.\n\nPRACTICAL DEVICE: do not end every post with the same checklist. Choose what the topic needs: checklist, 15-minute reset, weekend plan, first-week roadmap, decision tree, shopping/preparation list, maintenance rhythm, diagnostic questions, seasonal calendar, quick-reference guide, do-this-next sequence, observation journal, troubleshooting table, three-level plan, habit sequence, or another custom device.\n\nCLOSING: never default to \"Remember\", \"Ultimately\", \"At the end of the day\", \"With these tips\", \"By following these steps\", or \"In conclusion\". The ending may return to the opening scene, give one immediate action, resolve the original problem, show success, simplify the decision, leave a useful observation, establish tomorrow's next step, or connect the practice to daily life. It must belong specifically to that article.\n\nVISUAL ORIGINALITY: photography also receives an editorial fingerprint. Do not merely swap the object while preserving camera angle, room, garden, lighting, pose, composition, depth of field or palette. Vary subject, setting, composition, camera height, angle, focal-length feel, depth of field, time of day, light source, weather, surface textures, human presence, action, props, background and color relationships. Every image should look commissioned for this story, not generic AI stock. Inline images must advance the article by demonstrating a detail, stage, atmosphere, process, comparison, materials or next action.\n\nMONETIZATION: originality never removes monetization. Every qualifying long-form article keeps natural ad/affiliate opportunities. Normally include article-1, article-2 and article-3, but place them at natural editorial transitions instead of fixed paragraph counts. Affiliate recommendations must be contextually relevant. Never invent affiliate URLs, products, prices, discounts, ratings or claims.\n\nSEO: SEO must not create template writing. Optimize individually for intent, primary keyword, secondary concepts, title, slug, meta title, meta description, excerpt, topical coverage, descriptive headings, alt text, internal links and FAQ opportunities when appropriate. Do not force identical keyword-placement patterns. Reader usefulness comes first.\n\nCROSS-BATCH HISTORY: maintain a non-article fingerprint manifest with post_id, topic, angle, opening_type, architecture, major_examples, action_device, closing_type and featured_image_concept. Compare new work against it. A batch is a production boundary, not permission to reset originality.\n\nSIMILARITY REJECTION TEST: privately run SWAP, OUTLINE, OPENING, HEADING, EXAMPLE, ACTION, CLOSING and VISUAL tests. If two posts share more than roughly 30% of their meaningful structural pattern, redesign one. This is an editorial heuristic, not a plagiarism score. Article 100 gets the same independent planning effort as Article 1. Before accepting each article ask: \"Would an editor believe this article was independently commissioned?\" and \"Could the reader recognize its identity with the title and primary keyword hidden?\" If not, replan and rewrite.`;
 
   function build(cfg = {}, batchIndex = 0) {
-    const pl = plan(cfg);
-    const bi = Math.max(0, Math.min(pl.batches.length - 1, Number(batchIndex) || 0));
-    const batch = pl.batches[bi];
-    const n = { batchNo: bi + 1, batches: pl.batches.length, count: batch.length };
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const code = `${today}-b${String(n.batchNo).padStart(2, '0')}`;
-    const firstNo = bi * pl.size + 1;
-    const photos = n.count * 3;
-    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v6) — BATCH ${n.batchNo} OF ${n.batches}
-
-You are a senior editor, SEO strategist, affiliate-content specialist and photo director. You produce finished, publish-ready blog posts and detailed photo briefs for Aura Publisher, which imports your ONE ZIP, creates the photos, places the affiliate links and ads, completes the SEO and publishes every post live to WordPress. Write articles a reader would happily share and Google would want to rank.
-
-## 0. What you deliver — ONE complete ZIP
-Create **aura-package-${code}.zip** containing:
-- \`aura-posts.json\` — every post, fully written, with all SEO fields and a detailed brief for every photo (sections 3–9)
-- \`images/\` — ONLY real photographs you generated with your image generation tool and can save as files, named exactly as in the manifest. **Never draw, paint or code an image** (no Python/PIL, matplotlib, SVG, canvas, shapes or placeholder art). If your image tool cannot save files into the ZIP, leave \`images/\` out — Aura generates every photo from your briefs with the same image model, including the title on the cover.
-Give me the download link and one line per post: title — category — format_variant — word count — affiliate IDs used. Nothing else.
-If the whole batch will not fit in one reply, finish the current post, close the JSON validly, deliver the ZIP with the finished posts and list the remaining ones.
-
-## 1. Brief
-${line('Site / brand', cfg.siteName, 'a warm, trustworthy lifestyle-and-wellbeing brand')}
-${line('Niche', cfg.niche, 'mindful living, personal growth and practical wellbeing')}
-${line('Audience', cfg.audience, 'busy adults who want calm, practical, faith-friendly guidance without hype')}
-${line('Voice', cfg.voice, 'warm, clear, grounded, encouraging; short paragraphs; second person ("you")')}
-${clean(cfg.extra) ? `- Information and rules for EVERY post: ${clean(cfg.extra)}\n` : ''}- This batch: ${n.count} post${n.count > 1 ? 's' : ''} (batch ${n.batchNo} of ${n.batches}; posts ${firstNo}–${firstNo + n.count - 1} of ${pl.total}) 
-- Package code: ${code}
-
-## 2. Posts in this batch
-${topicBlock(batch, cfg, n)}
-
-## 3. Search intent and SEO depth (do this before writing each post)
-- Decide the searcher's intent (learn, compare, fix, buy) and answer it fully; the post must be the most useful result for its primary keyword.
-- **Direct answer:** the first paragraph under the first H2 is a 40–60-word plain answer to the main question (featured-snippet ready).
-- Use the primary keyword in the title, slug, first 100 words, one H2, the meta description and the takeaway. Use each secondary keyword naturally once or twice. Weave in 8–12 related terms and entities a real expert would mention (tools, materials, techniques, seasons, measurements, common mistakes).
-- H2s read like the questions and tasks people actually search for; include at least one "how to", one "why" or "what" and one "mistakes"/"avoid" angle where it fits.
-- Show experience: concrete details, numbers you are sure of (quantities, times, sizes, temperatures), sensory specifics and honest trade-offs. No invented statistics, studies, quotes or experts.
-- FAQ: 4–6 real questions people ask about the topic (the "People also ask" kind), each answered in 40–80 words, without repeating body text.
-
-## 4. The Mindful Adaption Standard v6 (required order for EVERY post)
-1. **Featured image** — the "featured_image" object (never inside "sections")
-2. **Relatable introduction** — type "intro", 90–150 words: a specific moment, feeling or problem the reader recognises, then a one-sentence promise.
-3. **Key takeaways** — type "takeaways", 3–5 short, specific bullet sentences (what the reader will be able to do).
-4. **Useful H2 sections** — 3 to 5 H2s, each 180–280 words (at least two are 250+ words). Mix in the rich blocks below so the page never feels blank.
-5. **Image slot #1** — type "image"
-6. **Ad slot #1** — type "ad", slot "article-1"
-7. **Practical examples** — one H2 that clearly signals examples ("Three real-life scenarios", "In practice", "What this looks like on a real Tuesday"), 220–320 words, 2–3 concrete named situations.
-8. **Image slot #2** — type "image"
-9. **Ad slot #2** — type "ad", slot "article-2"
-10. **FAQ** — one "faq" section with 4–6 items.
-11. **Action checklist** — H2 + one "checklist" with 5–8 specific, verb-first items for this week.
-12. **Closing takeaway** — H2 containing Takeaway, Bottom line, Final word, Before you go or Remember this + one 70–120-word paragraph that lands one memorable idea.
-
-**Rich blocks — each post uses all of these at least once, spread through the H2 sections:** a "callout" (tone "tip"), a second "callout" (tone "note", "warning" or "example"), one "pullquote" (a line from your own text worth highlighting — never a fake quote from a real person), one "list" (bullets) and one ordered "list" ("ordered": true) for steps. Keep paragraphs to 2–4 sentences.
-Target a **7–8 minute read: 1,650–1,950 words** including the FAQ. Never pad; add depth, specifics and examples.
-
-## 5. Anti-template uniqueness gate — REQUIRED
-Before writing, privately build a **batch differentiation matrix**. For each post choose a distinct reader situation, search intent, opening mechanism, structural arc, examples, H2 syntax pattern, checklist style, closing move, featured-photo composition and two inline-photo situations. Do not print the matrix.
-
-Use a different 'format_variant' for each post until the list is exhausted: story-led · field-guide · diagnostic · myth-vs-truth · step-ladder · question-led · framework · science-to-life · seasonal/timely · checklist-deep-dive · mistakes-to-avoid · before-and-after · decision-tree · case-study · beginner-roadmap · troubleshooting · comparison · weekend-project · 30-day-plan · reference-guide.
-
-**Similarity rejection rule:** after drafting the batch, compare every pair of posts. Rewrite a post if any of these are substantially alike: first 120 words; sequence/purpose of H2s; more than two H2 opening words; examples/scenarios; checklist verbs; FAQ questions; closing phrasing; photo setting/action. A paragraph should NOT be reusable in another article merely by swapping the keyword.
-
-Never use a fixed H2 template across the batch. Do not force every article to contain the same "what/why/how/mistakes" sequence; satisfy search intent with a custom outline. The required Aura blocks may appear at different natural points while preserving the required image/ad/checklist/takeaway order.
-
-Banned filler: "In today's fast-paced world", "Let's dive in", "delve", "game-changer", "unlock your potential", "navigate the complexities", "it's important to note", "in conclusion", "elevate", "whether you're a beginner or expert". Never invent first-person experience, studies, experts, statistics, prices or product claims.
-
-Inline formatting inside text: **bold** (2–4 key phrases per post), *italic*, [anchor](https://url) for editorial links, and only when affiliate IDs exist, [anchor](aff:ID). No HTML and no Markdown headings inside text.
-
-## 6. Affiliate links and ads — placed where they genuinely fit
-${affiliateBlock(cfg.ads)}
-
-Rules:
-- **Ad placements are mandatory in EVERY article even when no affiliate library is supplied.** Every post must contain 'article-1' and 'article-2'; Aura may add additional layout placements at publish time. Never omit an ad object because no product fits.
-- If affiliate IDs are available, use 2–4 natural [anchor text](aff:ID) links where products genuinely help. Each ID at most once per post. Never in headings, takeaways, FAQ, checklist or closing takeaway.
-- If NO affiliate IDs are available, write ZERO 'aff:' links. Keep both ad objects with 'ad_id' and 'url' empty so Aura can fill them later.
-- **Ad sections (article-1, article-2):** write a fresh context-specific 'label', one-sentence 'text', and 2–4 word 'cta'; set 'ad_id' to the best matching supplied ID or empty string, and 'url' to empty string.
-- Never invent an affiliate product, URL, price, discount, rating, endorsement or claim. Aura supplies disclosure, top banner, side cards, text-link conversion and end resources from its saved library.
-
-## 7. Photos — detailed briefs Aura turns into real photographs
-Every post has **1 featured cover + 2 inline photos**. Your briefs decide how good they are, so make them specific to THIS post's category and title.
-
-**Featured cover (title in the picture).** A premium magazine / Pinterest-style cover that instantly reads as a {category} article about {title}: a vibrant, abundant, sun-drenched photorealistic scene built from that category's real world (garden → lush beds, soil, harvest; food → a glowing spread of fresh whole foods; money → a warm organised desk; trading → monitors of blurred charts and a notebook of levels; faith → an open Bible in morning light…), with real people sharing a genuine moment in the scene, and the headline in huge hand-painted brush-script lettering on a painted brush-stroke banner.
-- "hero_text": the headline for the image, max 9 words, spelled exactly (usually the title or its main clause)
-- "hero_tagline": a short uppercase-style line under the headline, max 7 words (e.g. "Make better choices for a healthier you")
-- "cover_notes": 3 tiny handwritten details that appear on a chalkboard, note card or notebook in the scene, max 4 words each (e.g. "Real foods", "More energy", "Better health")
-- For "X vs Y", "buy vs skip", "mistakes" or before-and-after titles, describe a split scene: the bright, hopeful right way on the left, the darker wrong way on the right, headline across both halves.
-
-**Inline photos (no text at all).** Real people sharing a genuine human moment that acts out the exact idea of the section they sit in — a parent guiding a child's hands, friends laughing over a task, neighbours helping each other. Real emotion: relief, pride, encouragement, joy, calm focus. No empty rooms, no product-only shots, no smiles at the camera.
-
-Build a private shot list for the batch first: every photo gets a different combination of people + relationship + emotion, action from its section, specific setting (never repeated in the batch), shot (cover wide scene · inline-1 medium candid of two people · inline-2 close-up of hands working together with faces softly in frame), time of day and matching light, lens and a rich natural palette.
-
-Fields for every photo:
-- "filename": \`<post-slug>-featured.jpg\`, \`<post-slug>-inline-1.jpg\`, \`<post-slug>-inline-2.jpg\`
-- "alt_text": **[Who] [doing what] in [setting]** — 80–125 characters, complete, unique; the featured alt starts with the focus keyphrase
-- "caption": one short human sentence, unique per photo
-- "purpose", "subject" (3–6 words), "concept", "people", "emotion", "shot", "setting", "time_of_day", "lighting", "lens", "palette": short phrases from your shot list
-- "prompt": 100–160 words, a photographer's brief: "Photorealistic, vibrant editorial lifestyle photograph. [shot] of [people] [action] in [setting], [time of day], [lighting]. Human connection: [emotion], candid, not looking at the camera. Shot on a full-frame camera with a [lens]; layered composition with [3 real props] in the foreground. [palette]. [mood]. Natural skin texture, realistic hands, true-to-life colour, rich detail. Not an illustration, cartoon, vector or 3D render." Inline prompts add "No text, letters or logos anywhere". Landscape 3:2.
-- Every prompt is written for its own photo. Never reuse a prompt template across posts.
-
-## 8. SEO contract (every post — Aura audits and repairs metadata again on import)
-- "title": 50–60 characters, primary keyword near the start, specific benefit, human not clickbait
-- "meta_title": ≤ 60 characters (may equal the title or add a brand/benefit)
-- "meta_description": 140–155 characters, one or two complete sentences with the primary keyword and a clear reason to click; never cut off
-- "excerpt": 25–40 words, a complete teaser written differently from the meta description (shown on blog and category pages)
-- "focus_keyphrase": the primary keyword exactly
-- "slug": lowercase-hyphenated, 3–6 words, primary keyword included
-- "primary_keyword" + 3–5 "secondary_keywords" · "categories": 1–2 · "tags": 4–6 specific tags · "status": "publish"
-- Search intent must be explicit in the article itself. Avoid keyword cannibalization: no two posts in this batch may target the same primary keyword or near-identical slug.
-- Include useful internal-link opportunities as natural anchor phrases, but never invent URLs. Aura can add related published posts at publish time.
-- SEO score is a quality checklist, not a ranking guarantee; factual usefulness and satisfying intent outrank keyword repetition.
-
-## 9. Exact output — aura-posts.json
-\`\`\`json
-{
-  "protocol": "aura-13",
-  "standard": "Mindful Adaption Standard v6",
-  "generated": "${code}",
-  "posts": [
-    {
-      "post_id": "aura-${code}-01-<short-slug>",
-      "title": "…", "slug": "…", "meta_title": "…", "meta_description": "…", "excerpt": "…",
-      "focus_keyphrase": "…", "primary_keyword": "…", "secondary_keywords": ["…"],
-      "format_variant": "story-led", "categories": ["…"], "tags": ["…"], "status": "publish",
-      "hero_text": "<headline for the cover, max 9 words>", "hero_tagline": "<max 7 words>", "cover_notes": ["…", "…", "…"],
-      "featured_image": {"filename": "<slug>-featured.jpg", "alt_text": "…", "caption": "…", "purpose": "Featured image", "subject": "…", "concept": "…", "people": "…", "emotion": "…", "shot": "…", "setting": "…", "time_of_day": "…", "lighting": "…", "lens": "…", "palette": "…", "prompt": "…"},
-      "sections": [
-        {"type": "intro", "content": "…"},
-        {"type": "takeaways", "items": ["…", "…", "…"]},
-        {"type": "heading", "level": 2, "content": "…"},
-        {"type": "paragraph", "content": "<40–60-word direct answer>"},
-        {"type": "paragraph", "content": "… a [descriptive anchor](aff:<ID>) where it truly helps …"},
-        {"type": "callout", "tone": "tip", "label": "Try this", "content": "…"},
-        {"type": "heading", "level": 2, "content": "…"},
-        {"type": "paragraph", "content": "…"},
-        {"type": "list", "ordered": true, "items": ["…", "…", "…"]},
-        {"type": "pullquote", "content": "…"},
-        {"type": "heading", "level": 2, "content": "…"},
-        {"type": "paragraph", "content": "…"},
-        {"type": "list", "items": ["…", "…"]},
-        {"type": "callout", "tone": "warning", "label": "Watch out", "content": "…"},
-        {"type": "image", "filename": "<slug>-inline-1.jpg", "alt_text": "…", "caption": "…", "purpose": "…", "subject": "…", "concept": "…", "people": "…", "emotion": "…", "shot": "…", "setting": "…", "time_of_day": "…", "lighting": "…", "lens": "…", "palette": "…", "prompt": "…"},
-        {"type": "ad", "slot": "article-1", "ad_id": "<ID or empty>", "label": "…", "text": "…", "cta": "…", "url": ""},
-        {"type": "heading", "level": 2, "content": "<examples heading>"},
-        {"type": "paragraph", "content": "…"},
-        {"type": "image", "filename": "<slug>-inline-2.jpg", "…": "same fields as above"},
-        {"type": "ad", "slot": "article-2", "ad_id": "<ID or empty>", "label": "…", "text": "…", "cta": "…", "url": ""},
-        {"type": "faq", "items": [{"q": "…?", "a": "…"}, {"q": "…?", "a": "…"}]},
-        {"type": "heading", "level": 2, "content": "Your action checklist"},
-        {"type": "checklist", "items": ["…", "…", "…", "…", "…"]},
-        {"type": "heading", "level": 2, "content": "<takeaway heading>"},
-        {"type": "paragraph", "content": "…"}
-      ]
-    }
-  ]
-}
-\`\`\`
-Allowed section types: intro, takeaways, heading (level 2 or 3), paragraph, list, callout (tone tip/note/warning/example), pullquote, image, ad, faq, checklist. Valid JSON only (double quotes, no comments, no trailing commas). Number post_ids 01, 02… within this batch.
-
-## 10. Self-check before you deliver (fix anything that fails)
-For every post:
-- [ ] Standard v4 order exact; 1,650–1,950 words; at least two H2 sections of 250+ words
-- [ ] Direct 40–60-word answer under the first H2; primary keyword in title, slug, first 100 words, one H2, meta description, takeaway
-- [ ] title 50–60 chars · meta_title ≤ 60 · meta_description 140–155 complete · excerpt 25–40 words complete and different · focus_keyphrase set
-- [ ] takeaways, 2 callouts, 1 pullquote, 1 bullet list, 1 ordered list, FAQ with 4–6 items
-- [ ] 2–4 [anchor](aff:ID) links using only IDs from section 6; 2 ad sections with ad_id, label, text, cta and url ""
-- [ ] Cover brief fits the category and title, with hero_text, hero_tagline and 3 cover_notes; 2 inline photo briefs with real people sharing a genuine moment; nothing repeated across the batch; unique complete alt text
-- [ ] Unique format_variant, hook, H2 pattern and takeaway versus every other post; no banned phrases, invented facts or reused text
-- [ ] ONE ZIP: aura-posts.json plus only real generated photos (or no images folder); nothing drawn or coded
-
-Deliver the ZIP exactly as described in section 0.${n.batchNo < n.batches ? `\nWhen you are done, I will paste batch ${n.batchNo + 1}.` : ''}`;
+    const pl = plan(cfg), bi = Math.max(0, Math.min(pl.batches.length - 1, Number(batchIndex) || 0)), batch = pl.batches[bi];
+    const n = { batchNo: bi + 1, batches: pl.batches.length, count: batch.length }, today = new Date().toISOString().slice(0, 10).replace(/-/g, ''), code = `${today}-b${String(n.batchNo).padStart(2, '0')}`, firstNo = bi * pl.size + 1;
+    return `# AURA PUBLISHER — FULL-POST PACKAGE PROMPT (Mindful Adaption Standard v7 + Originality Engine) — BATCH ${n.batchNo} OF ${n.batches}\n\nYou are a senior editor, SEO strategist, affiliate-content specialist and photo director. Produce finished, publish-ready editorial pieces for Aura Publisher. Each post must be independently conceived rather than template-derived.\n\n## 0. Deliver ONE complete ZIP\nCreate **aura-package-${code}.zip** containing:\n- \`aura-posts.json\` — every post, all SEO fields, editorial fingerprint metadata, verified internal links and detailed photo briefs.\n- \`images/\` — only real generated photographs if your image tool can save them. Never create placeholder art with code. If images cannot be saved, omit the folder and Aura will generate them from your briefs.\nReturn the download link and one line per post: title — category — format_variant — word count — affiliate IDs used.\n\n## 1. Publication brief\n${line('Site / brand', cfg.siteName, 'a warm, trustworthy lifestyle-and-wellbeing brand')}\n${line('Niche', cfg.niche, 'mindful living, personal growth and practical wellbeing')}\n${line('Audience', cfg.audience, 'busy adults who want calm, practical, faith-friendly guidance without hype')}\n${line('Voice', cfg.voice, 'warm, clear, grounded, encouraging; readable short-to-medium paragraphs; second person when natural')}\n${clean(cfg.extra) ? `- Information/rules for every post: ${clean(cfg.extra)}\n` : ''}- Batch ${n.batchNo} of ${n.batches}; posts ${firstNo}–${firstNo + n.count - 1} of ${pl.total}; package ${code}.\n\n## 2. Posts\n${topicBlock(batch, n)}\n\n## 3. Search intent + factual depth\n- Privately identify intent and reader knowledge level before outlining. Answer the real task fully.\n- Use concrete details and honest trade-offs. Never invent statistics, studies, quotes, experts, prices or product claims.\n- Direct answers and featured-snippet formatting are useful only when they fit the query; do not force the same first-H2 pattern into every article.\n- FAQ is OPTIONAL: use it only when real secondary questions improve the page.\n- Target roughly 1,500–2,000 words for substantial evergreen guides, but let topic complexity determine final length. Do not pad.\n\n${ORIGINALITY}\n\n## 5. Required publishing components — flexible placement\nEvery long-form post must contain the components that genuinely help it, but their order and form should follow the article's fingerprint rather than a master outline. Required minimums: a featured image brief; a strong topic-specific opening; 3+ substantive H2 sections when the topic needs long-form coverage; 2 inline photo briefs placed where they advance understanding; at least 2 structured ad slots at natural editorial transitions; a practical action device appropriate to the article; and a topic-specific closing. Takeaways, ordered lists, pullquotes, callouts and FAQ are OPTIONAL tools, not mandatory repeated boxes.\n\n## 6. Affiliate + ad system\n${affiliateBlock(cfg.ads)}\n- Keep structured ad slots even when no affiliate product fits. For long posts normally provide article-1, article-2 and article-3 at natural transitions; Aura may reduce/expand placements based on final layout.\n- Use 0–4 natural \`[anchor](aff:ID)\` links only from the supplied library. Each ID at most once per post unless the brief explicitly requires otherwise.\n- If no affiliate ID fits, use no \`aff:\` link and keep the slot empty for Aura.\n- Ad objects: \`{"type":"ad","slot":"article-1","ad_id":"","label":"…","text":"…","cta":"…","url":""}\`. Never invent the URL.\n\n## 7. Verified internal routing\n${routingBlock(cfg)}\n\n## 8. Cross-batch editorial history\n${historyBlock(cfg)}\n\n## 9. Photography\nEach post needs 1 featured cover + 2 inline photo briefs unless the topic specifically needs more. Every photo has a distinct visual story. Featured images may contain title text only when Aura's cover mode asks for it; inline photos contain no text/logos. Use real people only when human presence naturally advances the story — do not force smiling stock-photo poses.\nFor every photo return: filename, alt_text, caption, purpose, subject, concept, people, emotion, shot, setting, time_of_day, lighting, lens, palette and a 100–160-word photorealistic editorial prompt. Alt text must describe the actual image, not stuff keywords.\n\n## 10. SEO contract\n- Unique title, slug, meta title, meta description and excerpt written for this page's intent.\n- Primary keyword used naturally; 3–6 secondary concepts/entities as appropriate.\n- 1–2 accurate categories, 4–8 specific tags. Avoid keyword cannibalization across the project.\n- Descriptive headings written for humans; natural internal links only to verified URLs; useful image alt text; canonical-friendly slug; complete excerpt.\n- No promise of a ranking. Optimize technical completeness, usefulness, discoverability, crawlable routing and reader satisfaction.\n\n## 11. Exact JSON contract\n\`\`\`json\n{\n  "protocol":"aura-17",\n  "standard":"Mindful Adaption Standard v7 + Originality Engine",\n  "generated":"${code}",\n  "posts":[{\n    "post_id":"aura-${code}-01-short-slug",\n    "title":"…","slug":"…","meta_title":"…","meta_description":"…","excerpt":"…",\n    "focus_keyphrase":"…","primary_keyword":"…","secondary_keywords":["…"],\n    "format_variant":"unique descriptive format name","categories":["…"],"tags":["…"],"status":"publish",\n    "editorial_fingerprint":{"angle":"…","opening_type":"…","architecture":"…","major_examples":["…"],"action_device":"…","closing_type":"…","featured_image_concept":"…"},\n    "internal_links":[{"type":"post","title":"Verified destination title","url":"https://verified-url"}],\n    "hero_text":"…","hero_tagline":"…","cover_notes":["…","…","…"],\n    "featured_image":{"filename":"slug-featured.jpg","alt_text":"…","caption":"…","purpose":"Featured image","subject":"…","concept":"…","people":"…","emotion":"…","shot":"…","setting":"…","time_of_day":"…","lighting":"…","lens":"…","palette":"…","prompt":"…"},\n    "sections":[\n      {"type":"intro","content":"…"},\n      {"type":"heading","level":2,"content":"topic-specific heading"},\n      {"type":"paragraph","content":"… optional [natural internal anchor](https://verified-url) …"},\n      {"type":"image","filename":"slug-inline-1.jpg","alt_text":"…","caption":"…","purpose":"…","subject":"…","concept":"…","people":"…","emotion":"…","shot":"…","setting":"…","time_of_day":"…","lighting":"…","lens":"…","palette":"…","prompt":"…"},\n      {"type":"ad","slot":"article-1","ad_id":"","label":"…","text":"…","cta":"…","url":""},\n      {"type":"callout","tone":"tip","label":"optional custom label","content":"…"},\n      {"type":"list","ordered":false,"items":["…"]},\n      {"type":"faq","items":[{"q":"…?","a":"…"}]},\n      {"type":"checklist","title":"custom practical-device heading","items":["…"]},\n      {"type":"paragraph","content":"topic-specific closing"}\n    ]\n  }]\n}\n\`\`\`\nAllowed section types: intro, takeaways, heading (2 or 3), paragraph, list, callout, pullquote, image, ad, faq, checklist, html. Do NOT include optional section types merely to satisfy a template. Valid JSON only.\n\n## 12. Final acceptance gate\nFor every post privately run the swap, outline, opening, heading, example, action, closing and visual tests. Reject/rewrite structural lookalikes. Verify every external/internal/affiliate URL comes from supplied data. Verify ad slots exist without crowding the reading experience. Verify photos advance the story. Verify metadata is complete and unique. Verify the editorial fingerprint is truthful to the finished article.\n\nDeliver the ZIP exactly as described.${n.batchNo < n.batches ? `\nWhen done, I will paste batch ${n.batchNo + 1}.` : ''}`;
   }
-
-  function buildAll(cfg = {}) {
-    const pl = plan(cfg);
-    return pl.batches.map((_, i) => build(cfg, i)).join('\n\n---\n\n');
-  }
-
+  function buildAll(cfg = {}) { const pl = plan(cfg); return pl.batches.map((_, i) => build(cfg, i)).join('\n\n---\n\n'); }
   window.AuraPrompt = { build, buildAll, plan, parseTopics, adId };
 })();

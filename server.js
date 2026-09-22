@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '7.0.0';
+const API_VERSION = '8.0.0';
 const PROTOCOL = 'aura-16';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
@@ -206,6 +206,11 @@ function normalizePost(raw = {}) {
     focus_keyphrase: String(pick(raw, 'focus_keyphrase', 'focus_keyword')).trim(),
     primary_keyword: raw.primary_keyword || '', secondary_keywords: arr(raw.secondary_keywords),
     format_variant: raw.format_variant || '', hero_text: clip(raw.hero_text || '', 70), hero_tagline: String(raw.hero_tagline || '').trim(), cover_notes: arr(raw.cover_notes).slice(0, 3),
+    editorial_fingerprint: raw.editorial_fingerprint && typeof raw.editorial_fingerprint === 'object' ? {
+      angle:String(raw.editorial_fingerprint.angle||''), opening_type:String(raw.editorial_fingerprint.opening_type||''), architecture:String(raw.editorial_fingerprint.architecture||''),
+      major_examples:arr(raw.editorial_fingerprint.major_examples).slice(0,8), action_device:String(raw.editorial_fingerprint.action_device||''), closing_type:String(raw.editorial_fingerprint.closing_type||''), featured_image_concept:String(raw.editorial_fingerprint.featured_image_concept||'')
+    } : {},
+    internal_links: (Array.isArray(raw.internal_links)?raw.internal_links:[]).map(x=>({type:String(x?.type||'post'),title:String(x?.title||''),url:String(x?.url||x?.link||'')})).filter(x=>/^https?:\/\//i.test(x.url)).slice(0,12),
     categories: arr(pick(raw, 'categories', 'category')), tags: arr(raw.tags),
     status: raw.status || 'draft', date: raw.date || '',
     featured_image: fi && (fi.filename || fi.prompt) ? fi : null, sections
@@ -236,62 +241,35 @@ function applyStandard(input, o = {}) {
   const s = p.sections || [];
 
   if (enforce && s.length) {
-    // 1. Relatable introduction first
-    const ft = s.findIndex(x => !['image', 'ad'].includes(x.type));
-    if (ft === -1 || s[ft].type !== 'intro') {
-      if (ft > -1 && s[ft].type === 'paragraph') s[ft] = { ...s[ft], type: 'intro' };
-      else { s.unshift({ type: 'intro', content: p.excerpt || p.title }); notes.push('Added an introduction from the excerpt'); }
+    // Preserve the article's editorial fingerprint. Aura repairs missing publishing essentials,
+    // but it does not rearrange every topic into one universal article skeleton.
+    if (!s.some(x => x.type === 'intro')) {
+      const pi=s.findIndex(x=>x.type==='paragraph');
+      if(pi>-1){ s[pi]={...s[pi],type:'intro'}; notes.push('Marked the opening paragraph as the introduction without changing its position'); }
+      else { s.unshift({type:'intro',content:p.excerpt||p.title}); notes.push('Added a minimal introduction because none was supplied'); }
     }
-    // 2. Featured image
     if (!p.featured_image?.filename) {
-      if (canGen) { p.featured_image = { filename: `${p.slug || 'post'}-featured.jpg`, alt_text: '', prompt: p.featured_image?.prompt || defaultPrompt(p, '', 'Wide hero composition.'), caption: '', purpose: 'Featured image', subject: '', generate: true }; notes.push('Added a featured image (will be generated)'); }
+      if (canGen) { p.featured_image = { filename: `${p.slug || 'post'}-featured.jpg`, alt_text: '', prompt: p.featured_image?.prompt || defaultPrompt(p, '', 'Wide editorial hero composition specific to this story.'), caption: '', purpose: 'Featured image', subject: '', generate: true }; notes.push('Added a featured image slot'); }
       else warnings.push('No featured image and image generation is off');
     }
-    // 3. Action checklist
-    let ci = s.findIndex(x => x.type === 'checklist');
-    const takeIdx = s.findIndex(x => x.type === 'heading' && TAKEAWAY_RE.test(x.content));
-    if (ci === -1) {
-      const h2 = s.filter(x => x.type === 'heading' && x.level === 2 && !TAKEAWAY_RE.test(x.content) && !EXAMPLES_RE.test(x.content)).map(x => x.content).slice(0, 6);
-      const items = h2.length >= 3 ? h2.map(h => `Put "${h.replace(/[.?!:]+$/, '')}" into practice this week`) : GENERIC_CHECKLIST;
-      const at = takeIdx > -1 ? takeIdx : s.length;
-      s.splice(at, 0, { type: 'checklist', title: 'Your Action Checklist', items });
-      notes.push('Added an action checklist (review wording)');
-      ci = at;
+    // Add only missing image/ad infrastructure, at natural H2 boundaries spread through the body.
+    const boundaries=s.map((x,i)=>x.type==='heading'&&x.level===2?i:-1).filter(i=>i>0);
+    const picks=[]; if(boundaries.length){picks.push(boundaries[Math.max(0,Math.floor(boundaries.length*.35))]); if(boundaries.length>1)picks.push(boundaries[Math.min(boundaries.length-1,Math.floor(boundaries.length*.72))]);}
+    else {picks.push(Math.max(1,Math.floor(s.length*.4)),Math.max(2,Math.floor(s.length*.75)));}
+    const taken = new Set([p.featured_image?.filename, ...s.filter(x=>x.type==='image').map(x=>x.filename)].filter(Boolean).map(lc));
+    const nearHeading = at => { for (let i=Math.min(at,s.length-1); i>=0; i--) if(s[i]?.type==='heading') return s[i].content; return ''; };
+    const newImg=(at,k)=>{let f=`${p.slug||'post'}-inline-${k}.jpg`;while(taken.has(lc(f)))f=`${p.slug||'post'}-inline-${++k}.jpg`;taken.add(lc(f));return {type:'image',filename:f,alt_text:'',caption:'',purpose:'Supporting image',subject:'',prompt:defaultPrompt(p,nearHeading(at),'Show a distinct story-specific detail or action.'),generate:true};};
+    let imgTotal=s.filter(x=>x.type==='image').length, adTotal=s.filter(x=>x.type==='ad').length;
+    const insertions=[];
+    for(let j=0;j<2;j++){
+      const at=Math.min(s.length,Math.max(1,picks[j]??Math.floor(s.length*((j+1)/3)))); const add=[];
+      if(canGen && imgTotal<2){add.push(newImg(at,j+1));imgTotal++;}
+      if(adTotal<2){add.push({type:'ad',slot:''});adTotal++;}
+      if(add.length)insertions.push([at,add]);
     }
-    // 4. Closing takeaway after the checklist
-    const hasTake = s.some((x, i) => i > ci && ((x.type === 'heading' && TAKEAWAY_RE.test(x.content)) || (x.type === 'callout' && TAKEAWAY_RE.test(x.label || ''))));
-    if (!hasTake) {
-      const intro = s.find(x => x.type === 'intro')?.content || '';
-      const closing = p.excerpt || (stripHtml(intro).match(/[^.!?]+[.!?]/g) || []).slice(0, 2).join(' ').trim() || p.title;
-      s.push({ type: 'heading', level: 2, content: 'The Takeaway' }, { type: 'paragraph', content: closing });
-      notes.push('Added a closing takeaway (review wording)');
-    }
-    // 5. Image + ad slots in the standard positions
-    ci = s.findIndex(x => x.type === 'checklist');
-    let slotB = ci;
-    if (ci > 0 && s[ci - 1].type === 'heading') slotB = ci - 1;
-    const introIdx = s.findIndex(x => x.type === 'intro');
-    const bodyH2 = s.map((x, i) => [x, i]).filter(([x, i]) => i > introIdx && i < slotB && x.type === 'heading' && x.level === 2).map(([, i]) => i);
-    let slotA = bodyH2.find(i => EXAMPLES_RE.test(s[i].content));
-    if (slotA == null) slotA = bodyH2.length >= 2 ? bodyH2[bodyH2.length - 1] : Math.max(introIdx + 1, Math.floor((introIdx + 1 + slotB) / 2));
-    if (slotA >= slotB) slotA = Math.max(introIdx + 1, slotB - 1);
-    const idxOf = t => s.map((x, i) => x.type === t ? i : -1).filter(i => i > -1);
-    const imgs = idxOf('image'), ads = idxOf('ad');
-    const has = (list, lo, hi) => list.some(i => i >= lo && i < hi);
-    let imgTotal = imgs.length, adTotal = ads.length;
-    const insA = [], insB = [];
-    const nearHeading = at => { for (let i = at; i >= 0; i--) if (s[i]?.type === 'heading') return s[i].content; return ''; };
-    const taken = new Set([p.featured_image?.filename, ...s.filter(x => x.type === 'image').map(x => x.filename)].filter(Boolean).map(lc));
-    const newImg = (at, k) => { let f = `${p.slug || 'post'}-inline-${k}.jpg`; while (taken.has(lc(f))) f = `${p.slug || 'post'}-inline-${++k}.jpg`; taken.add(lc(f)); return { type: 'image', filename: f, alt_text: '', caption: '', purpose: 'Supporting image', subject: '', prompt: defaultPrompt(p, nearHeading(at)), generate: true }; };
-    if (canGen) {
-      if (!has(imgs, slotA, slotB) && imgTotal < 2) { insB.push(newImg(slotB - 1, 2)); imgTotal++; }
-      if (!has(imgs, 0, slotA) && imgTotal < 2) { insA.push(newImg(slotA - 1, 1)); imgTotal++; }
-    } else if (imgTotal < 2) warnings.push(`Only ${imgTotal} inline image slot(s); the standard expects 2`);
-    if (!has(ads, slotA, slotB) && adTotal < 2) { insB.push({ type: 'ad', slot: '' }); adTotal++; }
-    if (!has(ads, 0, slotA) && adTotal < 2) { insA.push({ type: 'ad', slot: '' }); adTotal++; }
-    if (insB.length) s.splice(slotB, 0, ...insB);
-    if (insA.length) s.splice(slotA, 0, ...insA);
-    if (insA.length + insB.length) notes.push(`Filled ${insA.length + insB.length} missing image/ad slot(s)`);
+    insertions.sort((a,b)=>b[0]-a[0]).forEach(([at,add])=>s.splice(at,0,...add));
+    if(insertions.length) notes.push('Filled missing photo/ad publishing slots while preserving the article outline');
+    if(!canGen && imgTotal<2) warnings.push(`Only ${imgTotal} inline image slot(s); add useful story-specific visuals where they advance the article`);
   }
 
   // SEO fields: clean excerpt / meta description / meta title that never end mid-word
@@ -311,12 +289,8 @@ function applyStandard(input, o = {}) {
   if (!p.primary_keyword && p.focus_keyphrase) p.primary_keyword = p.focus_keyphrase;
   if (!p.tags.length) { p.tags = [...new Set([p.primary_keyword, ...(p.secondary_keywords || [])].filter(Boolean).map(t => t.replace(/\b\w/g, c => c.toUpperCase())))].slice(0, 6); if (p.tags.length) notes.push('Created tags from the keywords'); }
   if (!p.slug) p.slug = slug(p.primary_keyword && !slug(p.title).includes(slug(p.primary_keyword)) ? `${p.primary_keyword} ${p.title}` : p.title).split('-').slice(0, 8).join('-');
-  // Key takeaways box right after the intro (built from the H2s when ChatGPT did not supply one)
-  if (enforce && !s.some(x => x.type === 'takeaways')) {
-    const h2s = s.filter(x => x.type === 'heading' && x.level === 2 && !TAKEAWAY_RE.test(x.content) && !/checklist|faq|frequently asked/i.test(x.content)).map(x => x.content.replace(/^(step \d+:\s*)/i, '').replace(/[.?!:]+$/, ''));
-    const at = s.findIndex(x => x.type === 'intro');
-    if (h2s.length >= 3 && at > -1) { s.splice(at + 1, 0, { type: 'takeaways', title: "What you'll learn", items: h2s.slice(0, 5) }); notes.push('Added a "What you\'ll learn" box from the section headings'); }
-  }
+  // Originality Engine: takeaways are optional and are never auto-inserted.
+
 
   // Unique ad slot names
   const used = new Set(); let n = 0;
@@ -374,7 +348,7 @@ function seoAudit(p, words) {
   const h2 = sec.filter(x => x.type === 'heading');
   const imgs = [p.featured_image, ...sec.filter(x => x.type === 'image')].filter(Boolean);
   const text = sec.map(x => x.content || '').join(' ');
-  const links = (text.match(/\]\((https?:|aff:)/g) || []).length;
+  const links = (text.match(/\]\((https?:|aff:)/g) || []).length + (p.internal_links||[]).length;
   const kwCount = kw ? (text.toLowerCase().split(kw).length - 1) : 0;
   const density = words ? kwCount * kw.split(/\s+/).length / words * 100 : 0;
   const checks = [
@@ -393,7 +367,7 @@ function seoAudit(p, words) {
     ['Every image has alt text', imgs.length > 0 && imgs.every(i => i.alt_text && i.alt_text.length >= 20)],
     ['Keyphrase in featured image alt', has(p.featured_image?.alt_text)],
     ['Links in the text', links >= 1],
-    ['FAQ section', sec.some(x => x.type === 'faq')],
+    ['Useful structured support', sec.some(x => ['faq','list','checklist','callout','takeaways'].includes(x.type))],
     ['Categories and tags', (p.categories || []).length > 0 && (p.tags || []).length >= 3]
   ].map(([label, ok]) => ({ label, ok: !!ok }));
   return { score: Math.round(checks.filter(c => c.ok).length / checks.length * 100), checks, density: Math.round(density * 10) / 10 };
@@ -1064,7 +1038,7 @@ function renderPost(p, media, o = {}) {
     if (plan.side.has(i)) out.push(unit(plan.side.get(i), 'side'));
   });
   // Keep reading: other posts from this queue already live on the site
-  const related = (o.related || []).filter(r => r?.link && r.title && r.link !== o.selfLink).slice(0, 3);
+  const related = (o.related || []).filter(r => r?.link && r.title && r.link !== o.selfLink).slice(0, Math.max(1, Math.min(8, Number(o.internalLinkMax)||3)));
   if (design && related.length) out.push(box(`<p style="margin:0 0 10px;font-weight:700">Keep reading</p><ul style="margin:0;padding-left:1.1em">${related.map(r => `<li style="margin:.35em 0"><a href="${esc(r.link)}">${esc(r.title)}</a></li>`).join('')}</ul>`, 'margin:2em 0 1em;padding:18px 22px;border-radius:14px;background:#f4f6f9', 'aura-related'));
   if (plan.end.length) { out.push(endList(plan.end, o)); stats.end = plan.end.length; rc.affiliate = true; }
   stats.textLinks = rc.linksUsed;
@@ -1111,7 +1085,7 @@ async function uploadMedia(w, file, meta) {
 
 // ---------- routes ----------
 const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { templateStudio: true, wordpressBridge: true, resourceUploads: true, imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
-app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V16 (API ${API_VERSION})</p>`));
+app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V17 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
 
@@ -1135,9 +1109,9 @@ app.post('/api/wp/structure', async (req, res) => {
     const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
     const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,name,roles,capabilities');
     const [categories, pages, posts] = await Promise.all([
-      wpFetch(creds, 'categories?per_page=100&orderby=name&order=asc&_fields=id,name,slug,parent,count,description').catch(() => []),
+      wpFetch(creds, 'categories?per_page=100&orderby=name&order=asc&_fields=id,name,slug,parent,count,description,link').catch(() => []),
       wpFetch(creds, 'pages?per_page=100&status=publish,draft,pending,private&orderby=title&order=asc&context=edit&_fields=id,title,slug,status,link').catch(() => []),
-      wpFetch(creds, 'posts?per_page=50&status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_fields=id,title,slug,status,link').catch(() => [])
+      wpFetch(creds, 'posts?per_page=100&status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_fields=id,title,slug,status,link,categories,excerpt,modified').catch(() => [])
     ]);
     let bridge = null;
     try { bridge = await wpFetchNs(creds, 'aura/v1', 'ping'); } catch { try { bridge = await wpFetchNs(creds, 'aura/v1', 'status'); } catch {} }
@@ -1157,6 +1131,20 @@ app.post('/api/wp/bridge/status', async (req, res) => {
     let diagnostics=null; try{diagnostics=await wpFetchNs(creds,'aura/v1','diagnostics')}catch{}
     res.json({ok:true,status,diagnostics});
   } catch(e){ const o=wpError(e); if(e.status===404 || e.wpCode==='rest_no_route') return res.status(404).json({error:'Aura Site Bridge is not installed or not active.',code:'bridge_missing'}); res.status(400).json(o); }
+});
+
+app.post('/api/wp/content/search', async (req,res)=>{
+  try{
+    const w=req.body.wordpress||{}, q=String(req.body.q||'').trim(), limit=Math.max(1,Math.min(100,Number(req.body.limit)||60));
+    const d=await discoverWp(w), creds={...w,url:d.site,restRoot:d.root}, search=q?`&search=${encodeURIComponent(q)}`:'';
+    const [posts,pages,categories]=await Promise.all([
+      wpFetch(creds,`posts?per_page=${limit}&status=publish&orderby=${q?'relevance':'modified'}&order=desc&_fields=id,title,slug,link,categories,modified${search}`).catch(()=>[]),
+      wpFetch(creds,`pages?per_page=${limit}&status=publish&orderby=${q?'relevance':'modified'}&order=desc&_fields=id,title,slug,link,modified${search}`).catch(()=>[]),
+      wpFetch(creds,`categories?per_page=${limit}&orderby=${q?'name':'count'}&order=${q?'asc':'desc'}&_fields=id,name,slug,link,count${q?`&search=${encodeURIComponent(q)}`:''}`).catch(()=>[])
+    ]);
+    const items=[...posts.map(x=>({type:'post',id:x.id,title:x.title?.rendered||x.slug,url:x.link,slug:x.slug,categories:x.categories||[]})),...pages.map(x=>({type:'page',id:x.id,title:x.title?.rendered||x.slug,url:x.link,slug:x.slug})),...categories.map(x=>({type:'category',id:x.id,title:x.name,url:x.link,slug:x.slug,count:x.count||0}))].filter(x=>x.url);
+    res.json({ok:true,site:d.site,items:items.slice(0,limit*3),counts:{posts:posts.length,pages:pages.length,categories:categories.length}});
+  }catch(e){res.status(400).json(wpError(e));}
 });
 
 app.post('/api/wp/template/publish', async (req, res) => {
@@ -1371,4 +1359,4 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req
 app.use((e, q, r, n) => r.status(e.status === 413 || e.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: e.message }));
 
 export { normalizePost, applyStandard, validate, renderPost, planAds, artDirect };
-if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V16 (API ${API_VERSION}) listening on ${PORT}`));
+if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V17 (API ${API_VERSION}) listening on ${PORT}`));

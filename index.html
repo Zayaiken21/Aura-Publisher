@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="Aura Publisher">
 <meta name="theme-color" content="#086dff">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="styles.css?v=16.0.0">
+<link rel="stylesheet" href="styles.css?v=17.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -72,7 +72,7 @@
 <div id="app" hidden>
   <header class="top">
     <div class="brand"><span class="brand-photo" aria-hidden="true"><img src="aura-brand.svg" alt=""></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Studio</small></span></div>
-    <div class="top-r"><span class="pill" id="health">Engine offline</span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm logout-btn" aria-label="Sign out"><span class="logout-icon">↪</span><span class="logout-text">Sign out</span></button></div>
+    <div class="top-r"><span class="pill engine-pill" id="health"><span class="engine-dot"></span><span class="engine-copy">Offline</span><b class="engine-version">V17.0</b></span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm logout-btn" aria-label="Log out"><span class="logout-icon" aria-hidden="true">⏻</span><span class="logout-text">Log out</span></button></div>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -84,6 +84,11 @@
     <button data-tab="settings"><i>🔗</i><span><b>Connections</b><small id="tdConn">WordPress not added</small></span></button>
     <button data-tab="account"><i>🔐</i><span><b>Account</b><small id="tdAcct">Password, backup</small></span></button>
   </nav>
+  <div class="mobile-nav" aria-label="Aura tools">
+    <label><span>Workspace</span><select id="mobileTabSelect">
+      <option value="queue">Queue</option><option value="import">Import</option><option value="standard">Standard, ads & links</option><option value="prompt">ChatGPT prompt</option><option value="builder">Template Studio</option><option value="settings">Connections</option><option value="account">Account</option>
+    </select></label>
+  </div>
 
   <main>
     <!-- QUEUE -->
@@ -143,13 +148,12 @@
     <!-- STANDARD & ADS -->
     <section id="standard" class="tab">
       <div class="panel">
-        <h2>Mindful Adaption Standard</h2>
-        <ol class="flow" aria-label="Required post structure">
-          <li>Featured image</li><li>Relatable introduction</li><li>Useful H2 sections</li><li class="img">Image</li><li class="ad">Ad</li><li>Practical examples</li><li class="img">Image</li><li class="ad">Ad</li><li>Action checklist</li><li>Closing takeaway</li>
-        </ol>
-        <p class="muted">Target about a 7-minute read (1,550–1,800 words).</p>
+        <div class="row between wrap"><div><span class="studio-kicker">EDITORIAL SYSTEM</span><h2>Aura Originality Engine</h2></div><span class="micro-pill">Fingerprint-first</span></div>
+        <p class="muted">Every imported story keeps its own editorial architecture. Aura checks the essentials — useful depth, SEO, images, ads and link opportunities — without forcing every topic into one repeated article skeleton.</p>
+        <div class="originality-flow" aria-label="Editorial fingerprint workflow"><span>Reader situation</span><b>→</b><span>Search intent</span><b>→</b><span>Unique architecture</span><b>→</b><span>Visual story</span><b>→</b><span>SEO + monetization</span></div>
+        <p class="hint">The new prompt uses a cross-batch editorial-history manifest and similarity rejection tests so openings, headings, examples, action devices, closings and photography do not quietly drift back into templates.</p>
         <div class="grid2">
-          <label class="check"><input type="checkbox" id="stEnforce"> Enforce the standard on import (add missing intro, image/ad slots, checklist and takeaway)</label>
+          <label class="check"><input type="checkbox" id="stEnforce"> Preserve originality on import (repair missing essentials without forcing a universal outline)</label>
           <label class="check"><input type="checkbox" id="stAutoGen"> Create photos automatically after every import</label>
           <label>Featured cover
             <select id="stCover"><option value="full">Full cover: title + tagline + handwritten notes</option><option value="title">Title only on the photo</option><option value="photo">Photo only, no text</option></select>
@@ -207,6 +211,21 @@
         <input id="adFilter" type="search" placeholder="Search the library…" aria-label="Search the library">
         <div id="adList" class="adlist"></div>
         <div class="row"><button id="saveAds" class="primary">Save library</button></div>
+      </div>
+
+      <div class="panel link-router-panel">
+        <div class="row between wrap"><div><span class="studio-kicker">INTERNAL LINK ROUTER</span><h2>Route readers through your whole site</h2></div><span class="micro-pill" id="linkSelectedCount">0 selected</span></div>
+        <p class="muted">Pull real WordPress categories, pages and posts into Aura. Choose how imported stories receive internal links. Aura never invents URLs: every automatic link comes from your connected site or a URL already present in the story.</p>
+        <div class="grid3">
+          <label>Placement strategy<select id="linkMode"><option value="smart">Smart related</option><option value="rotate">Rotate selected links</option><option value="random">Random selected links</option><option value="manual">Manual only</option></select><small class="hint">Smart uses the story topic/category. Rotate guarantees even coverage across the queue. Random varies the selected pool deterministically. Manual leaves imported links untouched.</small></label>
+          <label>Internal links per post<select id="linkPerPost"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select><small class="hint">Unused selected links can still appear in a Keep Reading block so readers can reach them.</small></label>
+          <label class="check router-check"><input type="checkbox" id="linkUseAll" checked> <span><b>Use the full selected pool across the batch</b><small>Rotate links between posts before repeating them.</small></span></label>
+        </div>
+        <div class="site-search-row"><input id="siteLinkQuery" type="search" placeholder="Search your WordPress posts, pages and categories…"><button id="siteLinkSearch">Search site</button><button id="siteLinkRecent">Load recent</button></div>
+        <div id="siteLinkState" class="hint">Connect WordPress, then search or load recent content.</div>
+        <div id="siteLinkResults" class="site-link-results"></div>
+        <details class="sub"><summary>Selected routing pool</summary><div id="siteLinkSelected" class="selected-link-list"></div></details>
+        <div class="row wrap"><button id="saveLinkRouter" class="primary">Save link routing</button><button id="clearLinkRouter">Clear selected links</button></div>
       </div>
     </section>
 
@@ -278,6 +297,7 @@
               <label>Status<select id="tbStatus"><option value="publish">Publish live</option><option value="draft">Draft</option><option value="pending">Pending review</option><option value="private">Private</option></select></label>
             </div>
             <p class="hint" id="tbDestHint">Choose the exact WordPress destination. Category names are pulled from WordPress and displayed exactly as written. Full Aura Archive replaces the category body while preserving your WordPress header, footer and live post data.</p>
+            <div class="route-tools"><label class="check"><input type="checkbox" id="tbAutoRoute" checked> <span><b>Auto-route unfinished links</b><small>Match section cards to real WordPress categories, pages or posts when a URL is blank.</small></span></label><button id="tbFillRoutes">Fill links from WordPress</button></div>
             <div class="grid3 studio-options">
               <label>Category takeover<select id="tbArchiveMode"><option value="full">Full Aura archive</option><option value="header">Aura header + theme posts</option></select></label>
               <label>Live WordPress posts<select id="tbNativePosts"><option value="yes">Show latest category posts</option><option value="no">Template sections only</option></select></label>
@@ -318,7 +338,7 @@
           </div>
 
           <div class="panel">
-            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3><p class="muted">Each section has a specific job. Open a section to see when to use it, what content belongs there, and how it behaves on mobile.</p></div><button id="tbAddBlock">+ Add section</button></div>
+            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3><p class="muted">Each section has a specific job. Open it for guidance. Use a Dynamic WordPress Query section when the page should keep updating itself with real posts that match a search, category or tag.</p></div><button id="tbAddBlock">+ Add section</button></div>
             <div id="tbBlocks" class="builder-blocks"></div>
           </div>
 
@@ -419,11 +439,12 @@
   <div class="matchbody"><p class="hint">Check each photo is in the right spot. Change any match with its menu, then save.</p><div id="matchList" class="matchlist"></div>
   <div class="row"><button id="saveMatch" class="primary">Save photos</button></div></div></dialog>
 <dialog id="preview"><div class="dlg-head"><span id="previewMeta"></span><button type="button" class="ghost sm" id="closePreview">Close</button></div><article id="previewBody" class="article"></article></dialog>
+<dialog id="tbLargePreview" class="large-preview-dialog"><div class="large-preview-head"><button type="button" id="tbLargeBack" class="ghost">← Back to Template Studio</button><div><b id="tbLargeTitle">Template preview</b><small>Live responsive preview — your work stays open behind this view</small></div><div class="seg mini"><button type="button" data-large-device="desktop" class="on">Desktop</button><button type="button" data-large-device="tablet">Tablet</button><button type="button" data-large-device="mobile">Mobile</button></div></div><div class="large-preview-canvas"><iframe id="tbLargeFrame" title="Large template preview"></iframe></div></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=16.0.0"></script>
-<script src="aura-vault.js?v=16.0.0"></script>
-<script src="aura-prompt.js?v=16.0.0"></script>
-<script src="aura-v13.js?v=16.0.0"></script>
+<script src="config.js?v=17.0.0"></script>
+<script src="aura-vault.js?v=17.0.0"></script>
+<script src="aura-prompt.js?v=17.0.0"></script>
+<script src="aura-v17.js?v=17.0.0"></script>
 </body>
 </html>
