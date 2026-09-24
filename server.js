@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 
-const API_VERSION = '8.0.0';
+const API_VERSION = '9.0.0';
 const PROTOCOL = 'aura-16';
 const PORT = process.env.PORT || 8787;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
@@ -146,6 +146,23 @@ async function wpFetch(w, path, opts = {}, attempt = 0) {
   }
   if (!r.ok) throw Object.assign(new Error(j.message || `WordPress returned ${r.status}`), { status: r.status, wpCode: j.code, data: j.data, url });
   return j;
+}
+
+async function wpFetchAll(w, basePath, maxItems = 500) {
+  const out = []; const per = Math.min(100, maxItems);
+  for (let page = 1; page <= Math.ceil(maxItems / per); page++) {
+    const sep = basePath.includes('?') ? '&' : '?';
+    try {
+      const rows = await wpFetch(w, `${basePath}${sep}per_page=${per}&page=${page}`);
+      if (!Array.isArray(rows) || !rows.length) break;
+      out.push(...rows);
+      if (rows.length < per || out.length >= maxItems) break;
+    } catch (e) {
+      if (e.wpCode === 'rest_post_invalid_page_number' || e.status === 400) break;
+      throw e;
+    }
+  }
+  return out.slice(0, maxItems);
 }
 
 function wpError(e) {
@@ -1085,7 +1102,7 @@ async function uploadMedia(w, file, meta) {
 
 // ---------- routes ----------
 const healthBody = () => ({ ok: true, status: 'online', service: 'Aura Publisher Pro API', version: API_VERSION, protocol: PROTOCOL, features: { templateStudio: true, wordpressBridge: true, resourceUploads: true, imageGeneration: !!process.env.OPENAI_API_KEY, imageModel: IMAGE_MODEL, standard: 'Mindful Adaption Standard', statuses: ['draft', 'publish', 'future', 'pending', 'private'], adPlacement: ['top', 'side', 'inline', 'text', 'end'], visualEngine: true, coverStyles: ['full', 'title', 'photo'], seoAudit: true } });
-app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V17 (API ${API_VERSION})</p>`));
+app.get('/', (q, r) => r.type('html').send(`<h1>Aura Publisher Pro API</h1><p>Online — V18 (API ${API_VERSION})</p>`));
 app.get('/healthz', (q, r) => r.json(healthBody()));
 app.get('/health', (q, r) => r.json(healthBody()));
 
@@ -1109,9 +1126,9 @@ app.post('/api/wp/structure', async (req, res) => {
     const d = await discoverWp(w), creds = { ...w, url: d.site, restRoot: d.root };
     const me = await wpFetch(creds, 'users/me?context=edit&_fields=id,name,roles,capabilities');
     const [categories, pages, posts] = await Promise.all([
-      wpFetch(creds, 'categories?per_page=100&orderby=name&order=asc&_fields=id,name,slug,parent,count,description,link').catch(() => []),
-      wpFetch(creds, 'pages?per_page=100&status=publish,draft,pending,private&orderby=title&order=asc&context=edit&_fields=id,title,slug,status,link').catch(() => []),
-      wpFetch(creds, 'posts?per_page=100&status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_fields=id,title,slug,status,link,categories,excerpt,modified').catch(() => [])
+      wpFetchAll(creds, 'categories?orderby=name&order=asc&_fields=id,name,slug,parent,count,description,link', 500).catch(() => []),
+      wpFetchAll(creds, 'pages?status=publish,draft,pending,private&orderby=title&order=asc&context=edit&_fields=id,title,slug,status,link', 500).catch(() => []),
+      wpFetchAll(creds, 'posts?status=publish,draft,pending,private&orderby=modified&order=desc&context=edit&_embed=wp:featuredmedia&_fields=id,title,slug,status,link,categories,excerpt,modified,featured_media,_embedded', 1000).catch(() => [])
     ]);
     let bridge = null;
     try { bridge = await wpFetchNs(creds, 'aura/v1', 'ping'); } catch { try { bridge = await wpFetchNs(creds, 'aura/v1', 'status'); } catch {} }
@@ -1162,7 +1179,7 @@ app.post('/api/wp/template/publish', async (req, res) => {
       try {
         const payload = {
           name:t.name||'', eyebrow:t.eyebrow||'', title:t.title||t.name||'', intro:t.intro||'', hero:t.hero||'', accent:t.accent||'#2378d2', variant:t.variant||'editorial', mode:t.archiveMode||'full',
-          blocks:Array.isArray(t.blocks)?t.blocks:[], affiliates:Array.isArray(t.affiliates)?t.affiliates:[], showNativePosts:t.showNativePosts!==false, contentWidth:t.contentWidth||'1180', density:t.density||'balanced', radius:t.radius||'20', fontPair:t.fontPair||'modern', seo:t.seo||{}
+          blocks:Array.isArray(t.blocks)?t.blocks:[], affiliates:Array.isArray(t.affiliates)?t.affiliates:[], showNativePosts:t.showNativePosts!==false, contentWidth:t.contentWidth||'1180', density:t.density||'balanced', radius:t.radius||'20', fontPair:t.fontPair||'modern', seo:t.seo||{}, monetization:t.monetization||{}
         };
         const out = await wpFetchNs(creds,'aura/v1',`category/${id}/template`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         return res.json({ok:true,destination:'category',id,link:out.link,status:'updated',bridge:true,note:'Full category template published through Aura Site Bridge. Styles stay in the plugin, so WordPress cannot print them as raw text.'});
@@ -1359,4 +1376,4 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req
 app.use((e, q, r, n) => r.status(e.status === 413 || e.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: e.message }));
 
 export { normalizePost, applyStandard, validate, renderPost, planAds, artDirect };
-if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V17 (API ${API_VERSION}) listening on ${PORT}`));
+if (process.env.AURA_NO_LISTEN !== '1') app.listen(PORT, '0.0.0.0', () => console.log(`Aura V18 (API ${API_VERSION}) listening on ${PORT}`));

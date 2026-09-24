@@ -1,11 +1,11 @@
 {
   "name": "aura-publisher-pro",
-  "version": "17.0.0",
+  "version": "18.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check aura-v17.js && node --check aura-prompt.js"
+    "check": "node --check server.js && node --check aura-v18.js && node --check aura-prompt.js"
   },
   "engines": {
     "node": ">=20"

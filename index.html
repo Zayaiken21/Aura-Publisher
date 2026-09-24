@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="Aura Publisher">
 <meta name="theme-color" content="#086dff">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="styles.css?v=17.0.0">
+<link rel="stylesheet" href="styles.css?v=18.0.0">
 </head>
 <body>
 <div class="fx" aria-hidden="true"><div class="bg-cross">✝</div><div class="bolt b1">ϟ</div><div class="bolt b2">ϟ</div></div>
@@ -72,7 +72,7 @@
 <div id="app" hidden>
   <header class="top">
     <div class="brand"><span class="brand-photo" aria-hidden="true"><img src="aura-brand.svg" alt=""></span><span class="brand-copy"><b>Aura</b><span class="sub">Publisher Pro</span><small>WordPress Studio</small></span></div>
-    <div class="top-r"><span class="pill engine-pill" id="health"><span class="engine-dot"></span><span class="engine-copy">Offline</span><b class="engine-version">V17.0</b></span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm logout-btn" aria-label="Log out"><span class="logout-icon" aria-hidden="true">⏻</span><span class="logout-text">Log out</span></button></div>
+    <div class="top-r"><span class="pill engine-pill" id="health"><span class="engine-dot"></span><span class="engine-copy">Offline</span><b class="engine-version">V18.0</b></span><span class="who" id="who"></span><button id="signOutBtn" class="ghost sm logout-btn" aria-label="Log out"><span class="logout-icon" aria-hidden="true">⏻</span><span class="logout-text">Log out</span></button></div>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -337,14 +337,38 @@
             <div class="seo-checks" id="tbSeoChecks"></div>
           </div>
 
+          <div class="panel revenue-lab">
+            <div class="row between wrap"><div><span class="studio-kicker">KADENCE + AD REVENUE LAYOUT</span><h3>Monetization-safe structure</h3><p class="muted">These controls shape the layout Aura sends through the Site Bridge. They reserve real space for ad inventory before scripts load, keep the reading column comfortable, and make archive cards behave like native Kadence content rather than random placeholders.</p></div><a class="button-like" href="KADENCE-REVENUE-BLUEPRINT.md" target="_blank">Open full blueprint</a></div>
+            <div class="revenue-note"><b>Recommended Mindful Adaption baseline</b><span>760px reading column · 336px sidebar · sticky final rail unit · 2-column archive · 16:9 linked images · native ad slot after every 3 posts.</span></div>
+            <div class="grid3">
+              <label>Reading column<select id="tbReadingWidth"><option value="720">720px · compact</option><option value="760" selected>760px · recommended</option><option value="780">780px · spacious</option></select></label>
+              <label>Sidebar / ad rail<select id="tbSidebarWidth"><option value="300">300px</option><option value="336" selected>336px · recommended</option></select></label>
+              <label>Sticky final rail unit<select id="tbStickySidebar"><option value="yes">Yes</option><option value="no">No</option></select></label>
+              <label>Archive columns<select id="tbArchiveColumns"><option value="2" selected>2 desktop / 1 mobile</option><option value="3">3 desktop / 1 mobile</option></select></label>
+              <label>Featured image ratio<select id="tbImageRatio"><option value="16/9" selected>16:9 editorial</option><option value="4/3">4:3 lifestyle</option><option value="3/2">3:2 photo</option></select></label>
+              <label>Native ad frequency<select id="tbArchiveAdEvery"><option value="0">Off</option><option value="3" selected>After every 3 posts</option><option value="4">After every 4 posts</option><option value="6">After every 6 posts</option></select></label>
+              <label>Top ad reserved height<select id="tbTopAdHeight"><option value="90">90px</option><option value="180" selected>180px</option><option value="250">250px</option></select></label>
+              <label>In-content reserved height<select id="tbContentAdHeight"><option value="250">250px</option><option value="280" selected>280px</option><option value="320">320px</option></select></label>
+              <label>Archive ad reserved height<select id="tbArchiveAdHeight"><option value="250">250px</option><option value="280" selected>280px</option><option value="320">320px</option></select></label>
+            </div>
+            <label class="check seo-check"><input type="checkbox" id="tbLinkedImages" checked> Make every post/card image a real link to its WordPress destination</label>
+            <label class="check seo-check"><input type="checkbox" id="tbReserveAdSpace" checked> Reserve ad height before network scripts load (CLS protection)</label>
+            <div class="kadence-hook-map">
+              <div><b>Single post top</b><span>Kadence Element → Before Entry Content</span></div>
+              <div><b>Contextual ad</b><span>After a natural paragraph/heading transition</span></div>
+              <div><b>Post-end unit</b><span>Kadence Element → After Entry Content</span></div>
+              <div><b>Archive native unit</b><span>Aura Bridge → after N real WordPress cards</span></div>
+            </div>
+          </div>
+
           <div class="panel">
-            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3><p class="muted">Each section has a specific job. Open it for guidance. Use a Dynamic WordPress Query section when the page should keep updating itself with real posts that match a search, category or tag.</p></div><button id="tbAddBlock">+ Add section</button></div>
+            <div class="row between wrap"><div><span class="studio-kicker">SECTIONS</span><h3>Build the page</h3><p class="muted">Each section has a specific job. Use Real WordPress Feed / Dynamic WordPress Query blocks for actual posts, linked featured images and excerpts. Use Reserved Ad Slot blocks only at intentional editorial transitions.</p></div><button id="tbAddBlock">+ Add section</button></div>
             <div id="tbBlocks" class="builder-blocks"></div>
           </div>
 
           <div class="panel affiliate-lab">
-            <div class="row between wrap"><div><span class="studio-kicker">AFFILIATE CONVERSION LAYER</span><h3>Sticky side recommendations</h3></div><div class="row wrap"><button id="tbImportAffiliates">Import affiliate library</button><button id="tbAddAffiliate">+ Add affiliate card</button></div></div>
-            <p class="muted">Desktop and tablet use a sticky recommendation rail. On mobile the same cards move into the article flow automatically. Links publish with sponsored/nofollow attributes through Aura Site Bridge.</p>
+            <div class="row between wrap"><div><span class="studio-kicker">AFFILIATE CONVERSION LAYER</span><h3>Affiliate & recommendation placements</h3></div><div class="row wrap"><button id="tbImportAffiliates">Import affiliate library</button><button id="tbAddAffiliate">+ Add affiliate card</button></div></div>
+            <p class="muted">Choose whether each affiliate card belongs in the sticky rail, inline after a specific editorial section, or both. Aura keeps sponsored/nofollow attributes and collapses the rail into the content flow on mobile.</p>
             <div id="tbAffiliates" class="affiliate-builder"></div>
           </div>
 
@@ -442,9 +466,9 @@
 <dialog id="tbLargePreview" class="large-preview-dialog"><div class="large-preview-head"><button type="button" id="tbLargeBack" class="ghost">← Back to Template Studio</button><div><b id="tbLargeTitle">Template preview</b><small>Live responsive preview — your work stays open behind this view</small></div><div class="seg mini"><button type="button" data-large-device="desktop" class="on">Desktop</button><button type="button" data-large-device="tablet">Tablet</button><button type="button" data-large-device="mobile">Mobile</button></div></div><div class="large-preview-canvas"><iframe id="tbLargeFrame" title="Large template preview"></iframe></div></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js?v=17.0.0"></script>
-<script src="aura-vault.js?v=17.0.0"></script>
-<script src="aura-prompt.js?v=17.0.0"></script>
-<script src="aura-v17.js?v=17.0.0"></script>
+<script src="config.js?v=18.0.0"></script>
+<script src="aura-vault.js?v=18.0.0"></script>
+<script src="aura-prompt.js?v=18.0.0"></script>
+<script src="aura-v18.js?v=18.0.0"></script>
 </body>
 </html>

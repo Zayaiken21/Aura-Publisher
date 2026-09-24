@@ -1,37 +1,31 @@
-# Aura Publisher Pro V17 — Originality + Routing Studio
+# Aura Publisher Pro V18.0
 
-V17 upgrades Aura into a more complete WordPress publishing and site-formatting workspace while preserving the existing queue/import workflow.
+V18 upgrades Template Studio for the real Mindful Adaption WordPress/Kadence workflow.
 
 ## Highlights
 
-- **Originality Engine V7**: every article gets an independent editorial fingerprint. Aura no longer repairs imports by forcing one universal article skeleton.
-- **Internal Link Router**: search real WordPress posts, pages and categories, then use Smart, Rotate, Random or Manual routing. Imported stories may also carry their own verified `internal_links`.
-- **Template auto-routing**: unfinished template cards and CTAs can resolve to real WordPress destinations.
-- **Dynamic WordPress Query blocks**: category/page templates can show current published posts based on a search phrase and/or WordPress category.
-- **Technical SEO controls**: SEO title, description, canonical, robots, Open Graph, Twitter cards, schema and optional breadcrumbs through Aura Site Bridge.
-- **Responsive shell**: mobile uses one contained Workspace selector instead of overflowing tab bubbles. Desktop retains the full navigation.
-- **Large preview**: opens inside Aura as a full-screen dialog with a Back control; it no longer destroys the Studio state.
-- **Version-visible engine status**: the header always identifies the current V17.0 build.
-- **Explicit Log out control**: no ambiguous back-arrow logout button.
+- Real WordPress category/page/post routing with up to 1,000 posts loaded for Studio discovery.
+- Dynamic WordPress Query sections use real published post titles, excerpts, featured images and links.
+- Mindful Adaption category presets now contain live query blocks instead of fake/static article grids.
+- Kadence + Ad Revenue Layout controls: reading width, 300/336px rail, sticky rail setting, archive columns, image ratio, ad frequency and CLS-safe reserved heights.
+- Reserved Ad Slot section type for intentional monetization positions.
+- Archive loop can inject a native ad card after every N real WordPress posts through the `aura_archive_ad_slot` WordPress action.
+- Featured images in category/archive cards link to the real post.
+- Affiliate cards support Sticky Rail, Inline, or Rail + Inline placement and can be assigned after a specific template section.
+- Aura Site Bridge V1.4.0 adds revenue-layout metadata, CLS ad reservations, linked archive images and inline affiliate modules.
+- V18 editorial prompt keeps the Originality Engine while adding monetization-safe formatting and verified routing rules.
+- `KADENCE-REVENUE-BLUEPRINT.md` contains the complete Kadence implementation checklist.
 
-## WordPress bridge
+## WordPress install / upgrade
 
-Install the included `aura-wordpress-bridge.zip` (**Aura Site Bridge V1.3.0**) on the self-hosted WordPress site.
+1. Deploy the V18 frontend files and redeploy `server.js`.
+2. In WordPress, deactivate/delete the old Aura Site Bridge.
+3. Upload `aura-wordpress-bridge.zip` from this package.
+4. Activate Aura Site Bridge V1.4.0.
+5. Open Aura → Template Studio → Refresh WordPress.
+6. Choose the real category/page and load the matching preset.
+7. Preview desktop/tablet/mobile, then publish.
 
-1. WordPress → Plugins.
-2. Deactivate/delete an older Aura Site Bridge version.
-3. Add Plugin → Upload Plugin.
-4. Upload `aura-wordpress-bridge.zip` and activate it.
-5. In Aura, open Template Studio and press **Refresh WordPress**.
+## Kadence
 
-V1.3.0 adds dynamic query rendering, richer SEO metadata/schema output, category archive rendering and link-routing capabilities.
-
-## Deployment
-
-Deploy the contents of this folder as the Aura application and redeploy `server.js` on the backend host. The package version is `17.0.0`.
-
-User workspace data remains in Aura's existing IndexedDB/device storage. Replacing the application files does not intentionally clear the workspace database.
-
-## SEO note
-
-Aura's SEO score is a technical/completeness audit. It does not guarantee a search-engine position. Ranking also depends on content usefulness, intent match, crawl/index status, competition, authority, links and other search-engine signals.
+Read `KADENCE-REVENUE-BLUEPRINT.md` before changing the global Kadence Theme layout. Aura does not silently overwrite Kadence Customizer options; it publishes compatible template structure through the Bridge and gives you explicit controls for the monetization layer.

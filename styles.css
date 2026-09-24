@@ -375,7 +375,7 @@ select{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
   .tabs button{min-width:128px;max-width:145px}
 }
 
-/* ========== V17: mobile navigation, routing UI, stable preview, header fit ========== */
+/* ========== V18 foundation: mobile navigation, routing UI, stable preview, header fit ========== */
 .mobile-nav{display:none}
 .engine-pill{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;overflow:visible!important;max-width:none!important;min-height:36px;padding:6px 10px}
 .engine-dot{width:8px;height:8px;border-radius:50%;background:#6b7d90;box-shadow:0 0 0 4px #6b7d9022;flex:0 0 auto}
@@ -402,5 +402,28 @@ select{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
   .large-preview-head{gap:8px}.large-preview-head>#tbLargeBack{font-size:11px;padding:7px 9px}.large-preview-head .seg button{font-size:0;min-width:30px}.large-preview-head .seg button::first-letter{font-size:11px}
 }
 
-/* V17 narrow-screen large-preview labels remain readable. */
+/* V18 narrow-screen large-preview labels remain readable. */
 @media(max-width:430px){.large-preview-head .seg button{font-size:9px!important;min-width:0!important;padding:6px!important}.large-preview-head .seg button::first-letter{font-size:inherit!important}}
+
+/* V18 — Kadence revenue studio + hard responsive containment */
+.revenue-lab{border-color:#276f9f;background:radial-gradient(circle at 100% 0,#0b4f7f33,transparent 34%),linear-gradient(145deg,#06182d,#071f39)}
+.revenue-note{display:grid;gap:5px;margin:14px 0 16px;padding:14px 16px;border:1px solid #245782;border-radius:14px;background:#04172b;color:#bdd3e7}.revenue-note b{color:#fff;font-size:13px}.revenue-note span{font-size:12px;line-height:1.55}
+.kadence-hook-map{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:15px}.kadence-hook-map>div{min-width:0;padding:12px;border:1px solid #214c73;border-radius:13px;background:#05172b}.kadence-hook-map b{display:block;margin-bottom:5px;color:#fff;font-size:12px}.kadence-hook-map span{display:block;color:#8fa9c1;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.revenue-lab .button-like{border:1px solid #2a6390;background:#071b31;color:#c8e2f7}
+.builder-block-body input[type="number"]{width:100%}
+/* Absolutely nothing in the workspace is allowed to widen the app viewport. */
+#app,.shell,main,.tab,.panel,.studio-shell,.studio-main,.studio-side,.studio-preview,.builder-block,.builder-block-body,.affiliate-row,.resource-lab,.revenue-lab{max-width:100%;min-width:0}
+.panel input,.panel textarea,.panel select,.panel button,.button-like{max-width:100%}
+.panel p,.panel small,.panel span,.panel b,.panel h1,.panel h2,.panel h3,.panel label{overflow-wrap:anywhere}
+@media(max-width:980px){.kadence-hook-map{grid-template-columns:1fr 1fr}}
+@media(max-width:780px){
+  .kadence-hook-map{grid-template-columns:1fr}
+  .revenue-lab>.row{align-items:flex-start;flex-direction:column}.revenue-lab>.row .button-like{width:100%}
+  .revenue-note{padding:13px}
+  .studio-main{width:100%;overflow:visible}
+}
+@media(max-width:430px){
+  .panel{padding-left:13px;padding-right:13px}
+  .revenue-lab .grid3{display:grid!important;grid-template-columns:1fr!important}
+  .studio-kicker{letter-spacing:.14em}
+}
